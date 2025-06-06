@@ -751,6 +751,11 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expr> {
         Rule::unary_expr => parse_unary_expr(pair),
         Rule::postfix_expr => parse_postfix_expr(pair),
         Rule::primary_expr => parse_primary_expr(pair),
+        Rule::generic_args => {
+            // This shouldn't happen normally, but handle it gracefully
+            // Generic args by themselves are not a valid expression
+            return Err(anyhow!("Generic arguments cannot appear as a standalone expression"));
+        }
         _ => unreachable!("Unexpected expr rule: {:?}", pair.as_rule()),
     }
 }
@@ -932,11 +937,33 @@ fn parse_postfix_expr(pair: Pair<Rule>) -> Result<Expr> {
                 // Check what's inside this specific postfix_op
                 let op_str = op.as_str();
                 if op_str.starts_with('[') {
-                    // Array index: [expr]
-                    let index_expr = op.into_inner().next().unwrap();
-                    Expr::Index {
-                        array: Box::new(expr),
-                        index: Box::new(parse_expr(index_expr)?),
+                    // Could be array index or generic args - check the inner rule
+                    let inner = op.clone().into_inner().next();
+                    if let Some(inner_pair) = inner {
+                        if inner_pair.as_rule() == Rule::generic_args {
+                            // It's generic args, not array indexing
+                            match expr {
+                                Expr::Identifier(name) => {
+                                    // The op already contains the postfix_op with generic_args inside
+                                    // We need to extract the generic_args from it
+                                    let generic_args_pair = op.into_inner().next().unwrap();
+                                    let args = parse_generic_args(generic_args_pair)?;
+                                    Expr::Type(TypeExpr::Name(name, args))
+                                }
+                                _ => {
+                                    return Err(anyhow!("Generic arguments can only be applied to identifiers"));
+                                }
+                            }
+                        } else {
+                            // Regular array indexing
+                            let index_expr = op.into_inner().next().unwrap();
+                            Expr::Index {
+                                array: Box::new(expr),
+                                index: Box::new(parse_expr(index_expr)?),
+                            }
+                        }
+                    } else {
+                        return Err(anyhow!("Empty brackets in postfix position"));
                     }
                 } else if op_str.starts_with('(') {
                     // Function call: (expr_list?)
@@ -964,8 +991,16 @@ fn parse_postfix_expr(pair: Pair<Rule>) -> Result<Expr> {
                         return Err(anyhow!("Field access missing identifier"));
                     }
                 } else {
-                    // Generic args - ignore for now
-                    expr
+                    // Generic args - convert identifier to type expression
+                    match expr {
+                        Expr::Identifier(name) => {
+                            let args = parse_generic_args(op)?;
+                            Expr::Type(TypeExpr::Name(name, args))
+                        }
+                        _ => {
+                            return Err(anyhow!("Generic arguments can only be applied to identifiers"));
+                        }
+                    }
                 }
             }
             _ => unreachable!("Expected postfix_op, got {:?}", op.as_rule()),

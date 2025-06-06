@@ -163,6 +163,7 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Identifier(String),
+    Type(TypeExpr),
     Literal(Literal),
     Binary { op: BinaryOp, left: Box<Expr>, right: Box<Expr> },
     Unary { op: UnaryOp, expr: Box<Expr> },

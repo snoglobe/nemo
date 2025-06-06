@@ -712,6 +712,11 @@ impl CodeGenerator {
                 self.generate_expr(expr)?;
                 self.emit(")");
             }
+            Expr::Type(_) => {
+                // Types as expressions are only used for accessing constructors/static members
+                // They don't have a runtime representation
+                return Err(anyhow!("Type expressions cannot be used as values"));
+            }
         }
         Ok(())
     }

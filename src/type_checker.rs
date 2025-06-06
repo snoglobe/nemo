@@ -885,6 +885,12 @@ impl TypeChecker {
                 
                 Ok(type_expr.clone())
             }
+            Expr::Type(type_expr) => {
+                // For a type used as an expression, return the type itself
+                // This is used for accessing static members/constructors on types
+                self.validate_type_expr(type_expr)?;
+                Ok(type_expr.clone())
+            }
         }
     }
     
@@ -1022,6 +1028,7 @@ impl TypeChecker {
             Expr::Index { .. } => Ok(()),
             Expr::Field { .. } => Ok(()),
             Expr::Unary { op: UnaryOp::Deref, .. } => Ok(()),
+            Expr::Type(_) => Err(anyhow!("Type expression is not an lvalue")),
             _ => Err(anyhow!("Expression is not an lvalue")),
         }
     }
@@ -1045,6 +1052,7 @@ impl TypeChecker {
                     _ => Err(anyhow!("Cannot dereference non-pointer")),
                 }
             }
+            Expr::Type(_) => Err(anyhow!("Type expression is not an lvalue")),
             _ => Err(anyhow!("Not an lvalue")),
         }
     }
