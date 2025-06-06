@@ -1,0 +1,194 @@
+// Binary Search Tree implementation
+
+// Node type for the tree
+node[T]: type := struct {
+    value: T,
+    left: ptr[node[T]],
+    right: ptr[node[T]]
+}
+
+// Binary search tree
+bst[T]: type := struct {
+    root: ptr[node[T]],
+    
+    // Create a new empty tree
+    new: () bst[T] {
+        return { root: 0 as ptr[node[T]] }
+    }
+    
+    // Insert a value (requires allocation - simulated)
+    insert: (mut self, value: T) where T: i32 | i64 | u32 | u64 {
+        // Note: In real implementation, this would use heap allocation
+        // For this example, we'll use a static pool (simplified)
+        
+        if self.root == 0 as ptr[node[T]] {
+            // Create root node
+            self.root = create_node[T](value)
+        } else {
+            insert_recursive[T](self.root, value)
+        }
+    }
+    
+    // Search for a value
+    contains: (self, value: T) bool where T: i32 | i64 | u32 | u64 {
+        return search_recursive[T](self.root, value)
+    }
+    
+    // Find minimum value
+    min: (self) option[T] where T: i32 | i64 | u32 | u64 {
+        if self.root == 0 as ptr[node[T]] {
+            return option.none()
+        }
+        
+        mut current: ptr[node[T]] := self.root
+        while (*current).left != 0 as ptr[node[T]] {
+            current = (*current).left
+        }
+        return option.some((*current).value)
+    }
+    
+    // Find maximum value
+    max: (self) option[T] where T: i32 | i64 | u32 | u64 {
+        if self.root == 0 as ptr[node[T]] {
+            return option.none()
+        }
+        
+        mut current: ptr[node[T]] := self.root
+        while (*current).right != 0 as ptr[node[T]] {
+            current = (*current).right
+        }
+        return option.some((*current).value)
+    }
+    
+    // In-order traversal
+    traverse_inorder: (self, f: (T)) where T: i32 | i64 | u32 | u64 {
+        if self.root != 0 as ptr[node[T]] {
+            traverse_inorder_recursive[T](self.root, f)
+        }
+    }
+}
+
+// Helper functions (would normally be private)
+create_node[T]: (value: T) ptr[node[T]] where T: i32 | i64 | u32 | u64 {
+    // In real implementation, this would allocate memory
+    // For demo, we return a dummy pointer
+    return 1 as ptr[node[T]]  // Simplified
+}
+
+insert_recursive[T]: (root: ptr[node[T]], value: T) where T: i32 | i64 | u32 | u64 {
+    if value < (*root).value {
+        if (*root).left == 0 as ptr[node[T]] {
+            (*root).left = create_node[T](value)
+        } else {
+            insert_recursive[T]((*root).left, value)
+        }
+    } else if value > (*root).value {
+        if (*root).right == 0 as ptr[node[T]] {
+            (*root).right = create_node[T](value)
+        } else {
+            insert_recursive[T]((*root).right, value)
+        }
+    }
+    // If equal, don't insert (no duplicates)
+}
+
+search_recursive[T]: (root: ptr[node[T]], value: T) bool where T: i32 | i64 | u32 | u64 {
+    if root == 0 as ptr[node[T]] {
+        return false
+    }
+    
+    if value == (*root).value {
+        return true
+    } else if value < (*root).value {
+        return search_recursive[T]((*root).left, value)
+    } else {
+        return search_recursive[T]((*root).right, value)
+    }
+}
+
+traverse_inorder_recursive[T]: (root: ptr[node[T]], f: (T)) where T: i32 | i64 | u32 | u64 {
+    if root == 0 as ptr[node[T]] {
+        return
+    }
+    
+    traverse_inorder_recursive[T]((*root).left, f)
+    f((*root).value)
+    traverse_inorder_recursive[T]((*root).right, f)
+}
+
+// Stack-based expression evaluator
+eval_expr: (expr: str) result[i32, str] {
+    // Simplified tokenizer and evaluator
+    // In real implementation, this would parse the string properly
+    
+    // For demo, handle simple cases
+    if expr == "2 + 3" {
+        return result.ok(5)
+    } else if expr == "10 / 0" {
+        return result.err("Division by zero")
+    } else {
+        return result.err("Invalid expression")
+    }
+}
+
+// Main program demonstrating the tree
+main: () i32 {
+    // Create a binary search tree
+    mut tree: bst[i32] := bst[i32].new()
+    
+    // Insert values
+    values: [7 i32] := {50, 30, 70, 20, 40, 60, 80}
+    for val in values {
+        tree.insert(val)
+    }
+    
+    // Search for values
+    found1: bool := tree.contains(40)  // Should be true
+    found2: bool := tree.contains(45)  // Should be false
+    
+    // Find min and max
+    min_opt: option[i32] := tree.min()
+    min_val: i32 := match type min_opt {
+        option.some: { min_opt.some },
+        option.none: { -1 }
+    }
+    
+    max_opt: option[i32] := tree.max()
+    max_val: i32 := match type max_opt {
+        option.some: { max_opt.some },
+        option.none: { -1 }
+    }
+    
+    // Count nodes during traversal
+    mut count: i32 := 0
+    tree.traverse_inorder(|n: i32| { count += 1 })
+    
+    // Expression evaluation
+    expr_result: result[i32, str] := eval_expr("2 + 3")
+    expr_value: i32 := match type expr_result {
+        result.ok: { expr_result.ok },
+        result.err: { 0 }
+    }
+    
+    // Demonstrate structural typing
+    point2d: type := struct { x: i32, y: i32 }
+    point3d: type := struct { x: i32, y: i32, z: i32 }
+    
+    p3: point3d := { x: 1, y: 2, z: 3 }
+    p2: point2d := p3  // OK: structural subtyping
+    
+    // Complex match expression
+    score: i32 := 85
+    grade: str := match score {
+        100: { "Perfect" },
+        n: { 
+            if n >= 90 { "A" } 
+            else if n >= 80 { "B" }
+            else if n >= 70 { "C" }
+            else if n >= 60 { "D" }
+            else { "F" }
+        }
+    }
+    
+    return 0
+}

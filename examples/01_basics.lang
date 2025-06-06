@@ -1,0 +1,52 @@
+// Basic types and operations
+main: () i32 {
+    // Integer types
+    x: i32 := 42
+    y: u8 := 255
+    z: i64 := -1000000
+    
+    // Floating point
+    pi: float := 3.14159
+    
+    // Boolean
+    flag: bool := true
+    other: bool := false
+    
+    // Arithmetic operations
+    sum: i32 := x + 10
+    diff: i32 := x - 5
+    prod: i32 := x * 2
+    quot: i32 := x / 3
+    rem: i32 := x % 10
+    
+    // Bitwise operations
+    a: u32 := 0xFF00
+    b: u32 := 0x00FF
+    bit_and: u32 := a & b
+    bit_or: u32 := a | b
+    bit_xor: u32 := a ^ b
+    bit_not: u32 := ~a
+    
+    // Shifts
+    left: u32 := a << 2
+    right: u32 := a >> 2
+    
+    // Comparisons
+    eq: bool := x == 42
+    neq: bool := x != 0
+    lt: bool := x < 100
+    gt: bool := x > 0
+    lte: bool := x <= 42
+    gte: bool := x >= 42
+    
+    // Logical operations
+    and_result: bool := flag && other
+    or_result: bool := flag || other
+    not_result: bool := !flag
+    
+    // Type casts
+    byte_val: u8 := x as u8
+    float_val: float := x as float
+    
+    return 0
+}

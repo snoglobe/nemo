@@ -1,0 +1,160 @@
+// Control flow examples
+
+// Helper function for testing
+abs: (n: i32) i32 {
+    return if n < 0 { -n } else { n }
+}
+
+// Function demonstrating never type
+panic: (msg: str) never {
+    // In real implementation, this would print and exit
+    // For now, we'll use an infinite loop
+    while true { }
+}
+
+main: () i32 {
+    // If statements
+    x: i32 := 10
+    if x > 0 {
+        x = x + 1
+    }
+    
+    if x > 5 {
+        x = x * 2
+    } else {
+        x = x / 2
+    }
+    
+    // If-else chain
+    grade: i32 := 85
+    mut letter: str := ""
+    if grade >= 90 {
+        letter = "A"
+    } else if grade >= 80 {
+        letter = "B"
+    } else if grade >= 70 {
+        letter = "C"
+    } else if grade >= 60 {
+        letter = "D"
+    } else {
+        letter = "F"
+    }
+    
+    // If expressions
+    max: i32 := if x > 20 { x } else { 20 }
+    sign: i32 := if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
+    
+    // While loops
+    mut i: i32 := 0
+    while i < 10 {
+        i += 1
+    }
+    
+    // While with break
+    mut j: i32 := 0
+    while true {
+        if j >= 5 { break }
+        j += 1
+    }
+    
+    // While with continue
+    mut sum: i32 := 0
+    mut k: i32 := 0
+    while k < 10 {
+        k += 1
+        if k % 2 == 0 { continue }
+        sum += k  // Only odd numbers
+    }
+    
+    // C-style for loop
+    mut fact: i32 := 1
+    for n: i32 := 1; n <= 5; n += 1 {
+        fact *= n
+    }
+    
+    // For loop with omitted parts
+    mut m: i32 := 0
+    for ; m < 3; {
+        m += 1
+    }
+    
+    // Infinite for loop
+    mut count: i32 := 0
+    for ; ; {
+        count += 1
+        if count >= 3 { break }
+    }
+    
+    // For-in loop with array
+    arr: [5 i32] := {1, 2, 3, 4, 5}
+    mut total: i32 := 0
+    for val in arr {
+        total += val
+    }
+    
+    // For-in with mutable iteration
+    mut data: [3 i32] := {10, 20, 30}
+    for mut p in data {
+        *p = *p + 1
+    }
+    
+    // Nested loops with labels
+    mut found: bool := false
+    outer: for row: i32 := 0; row < 3; row += 1 {
+        inner: for col: i32 := 0; col < 3; col += 1 {
+            if row * 3 + col == 5 {
+                found = true
+                break outer
+            }
+        }
+    }
+    
+    // Continue with label
+    mut special_sum: i32 := 0
+    loop1: for a: i32 := 0; a < 5; a += 1 {
+        loop2: for b: i32 := 0; b < 5; b += 1 {
+            if a + b == 4 {
+                continue loop1  // Skip rest of inner loop
+            }
+            special_sum += a * b
+        }
+    }
+    
+    // Value match statement
+    status: i32 := 2
+    mut message: str := ""
+    match status {
+        0: { message = "success" }
+        1: { message = "warning" }
+        2: { message = "error" }
+        n: { message = "unknown" }
+    }
+    
+    // Match expression
+    code: i32 := 404
+    response: str := match code {
+        200: { "OK" },
+        404: { "Not Found" },
+        500: { "Server Error" },
+        c: { "Other" }
+    }
+    
+    // Match with complex patterns
+    value: i32 := 42
+    category: str := match value {
+        0: { "zero" },
+        1: { "one" },
+        2: { "two" },
+        n: { if n < 0 { "negative" } else if n < 10 { "small" } else { "large" } }
+    }
+    
+    // Early return
+    if x > 100 {
+        return 1
+    }
+    
+    // Using never type in expressions
+    result: i32 := if found { 42 } else { panic("not found") }
+    
+    return 0
+}

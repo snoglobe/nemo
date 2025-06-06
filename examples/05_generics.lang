@@ -1,0 +1,142 @@
+// Generics and type constraints
+
+// Generic struct
+pair[T, U]: type := struct {
+    first: T,
+    second: U,
+    
+    // Generic method
+    swap: (self) pair[U, T] {
+        return { first: self.second, second: self.first }
+    }
+}
+
+// Generic with static parameter
+buffer[static N: int, T]: type := struct {
+    data: [N T],
+    
+    get: (self, index: int) T {
+        return self.data[index]
+    }
+    
+    set: (mut self, index: int, value: T) {
+        self.data[index] = value
+    }
+}
+
+// Generic function
+identity[T]: (x: T) T {
+    return x
+}
+
+// Generic function with multiple parameters
+swap[T]: (mut a: ptr[T], mut b: ptr[T]) {
+    tmp: T := *a
+    *a = *b
+    *b = tmp
+}
+
+// Type constraints with union
+numeric: type := i8 | i16 | i32 | i64 | u8 | u16 | u32 | u64 | float
+
+add[T]: (a: T, b: T) T where T: numeric {
+    return a + b
+}
+
+// Multiple constraints
+comparable: type := numeric | bool
+
+min[T]: (a: T, b: T) T where T: comparable {
+    return if a < b { a } else { b }
+}
+
+// Generic with method constraint
+printable: type := struct {
+    to_string: (self) str
+}
+
+// Note: In the actual language, this would require intersection types
+// to properly express "T must have a to_string method"
+// For now, we'll demonstrate the concept
+
+// Generic list type
+list[T]: type := struct {
+    head: option[struct { value: T, next: ptr[list[T]] }],
+    
+    // Static constructor
+    new: () list[T] {
+        return { head: option.none() }
+    }
+    
+    // Push to front
+    push: (mut self, value: T) {
+        old_head: option[struct { value: T, next: ptr[list[T]] }] := self.head
+        
+        new_node: struct { value: T, next: ptr[list[T]] } := match type old_head {
+            option.some: { { value: value, next: ^old_head.some } },
+            option.none: { { value: value, next: 0 as ptr[list[T]] } }
+        }
+        
+        self.head = option.some(new_node)
+    }
+}
+
+// Generic with nested type parameters
+map_entry[K, V]: type := struct {
+    key: K,
+    value: V
+}
+
+// Static generic value
+static default_size[T]: int where T: numeric := 10
+
+main: () i32 {
+    // Using generic struct
+    p1: pair[i32, str] := { first: 42, second: "hello" }
+    p2: pair[str, i32] := p1.swap()
+    
+    // Different instantiation
+    p3: pair[bool, float] := { first: true, second: 3.14 }
+    
+    // Generic with static parameter
+    buf: buffer[5, i32] := { data: {1, 2, 3, 4, 5} }
+    val: i32 := buf.get(2)
+    
+    mut mbuf: buffer[3, str] := { data: {"a", "b", "c"} }
+    mbuf.set(1, "x")
+    
+    // Using generic functions
+    x: i32 := identity[i32](42)
+    s: str := identity[str]("hello")
+    
+    // Swap function
+    mut a: i32 := 10
+    mut b: i32 := 20
+    swap[i32](^a, ^b)
+    
+    // Constrained generics
+    sum1: i32 := add[i32](10, 20)
+    sum2: float := add[float](3.14, 2.71)
+    // sum3: bool := add[bool](true, false)  // Error: bool not in numeric
+    
+    // Min function
+    m1: i32 := min[i32](5, 3)
+    m2: float := min[float](1.5, 2.5)
+    
+    // Generic list
+    mut lst: list[i32] := list[i32].new()
+    lst.push(10)
+    lst.push(20)
+    lst.push(30)
+    
+    // Nested generics
+    entry: map_entry[str, i32] := { key: "age", value: 25 }
+    
+    // Complex nested generic
+    nested: pair[pair[i32, i32], str] := {
+        first: { first: 1, second: 2 },
+        second: "coordinate"
+    }
+    
+    return 0
+}
