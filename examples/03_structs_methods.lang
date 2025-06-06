@@ -5,25 +5,25 @@ point: type := struct {
     
     // Static method (constructor)
     new: (x: i32, y: i32) point {
-        return { x: x, y: y }
+        return { x: x, y: y };
     }
     
     // Instance method (immutable self)
     manhattan_distance: (self) i32 {
-        abs_x: i32 := if self.x < 0 { -self.x } else { self.x }
-        abs_y: i32 := if self.y < 0 { -self.y } else { self.y }
-        return abs_x + abs_y
+        abs_x: i32 := if self.x < 0 { -self.x } else { self.x };
+        abs_y: i32 := if self.y < 0 { -self.y } else { self.y };
+        return abs_x + abs_y;
     }
     
     // Mutable method
     translate: (mut self, dx: i32, dy: i32) {
-        self.x += dx
-        self.y += dy
+        self.x += dx;
+        self.y += dy;
     }
     
     // Method returning self type
     scaled: (self, factor: i32) point {
-        return { x: self.x * factor, y: self.y * factor }
+        return { x: self.x * factor, y: self.y * factor };
     }
 }
 
@@ -33,65 +33,65 @@ rectangle: type := struct {
     bottom_right: point,
     
     width: (self) i32 {
-        return self.bottom_right.x - self.top_left.x
+        return self.bottom_right.x - self.top_left.x;
     }
     
     height: (self) i32 {
-        return self.bottom_right.y - self.top_left.y
+        return self.bottom_right.y - self.top_left.y;
     }
     
     area: (self) i32 {
-        return self.width() * self.height()
+        return self.width() * self.height();
     }
     
     contains: (self, p: point) bool {
         return p.x >= self.top_left.x && p.x <= self.bottom_right.x &&
-               p.y >= self.top_left.y && p.y <= self.bottom_right.y
+               p.y >= self.top_left.y && p.y <= self.bottom_right.y;
     }
 }
 
 // Anonymous struct type
 make_pair: (a: i32, b: i32) struct { first: i32, second: i32 } {
-    return { first: a, second: b }
+    return { first: a, second: b };
 }
 
 main: () i32 {
     // Using static method
-    p1: point := point.new(10, 20)
+    p1: point := point.new(10, 20);
     
     // Direct struct literal
-    p2: point := { x: 30, y: 40 }
+    p2: point := { x: 30, y: 40 };
     
     // Using instance methods
-    dist: i32 := p1.manhattan_distance()
+    dist: i32 := p1.manhattan_distance();
     
     // Mutable struct and method
-    mut p3: point := { x: 5, y: 5 }
-    p3.translate(10, 15)
+    mut p3: point := { x: 5, y: 5 };
+    p3.translate(10, 15);
     
     // Method chaining
-    p4: point := p1.scaled(2)
+    p4: point := p1.scaled(2);
     
     // Nested struct access
     rect: rectangle := {
         top_left: { x: 0, y: 0 },
         bottom_right: { x: 100, y: 50 }
-    }
+    };
     
-    w: i32 := rect.width()
-    h: i32 := rect.height()
-    a: i32 := rect.area()
+    w: i32 := rect.width();
+    h: i32 := rect.height();
+    a: i32 := rect.area();
     
-    inside: bool := rect.contains(p1)
+    inside: bool := rect.contains(p1);
     
     // Anonymous struct
-    pair: struct { first: i32, second: i32 } := make_pair(1, 2)
+    pair: struct { first: i32, second: i32 } := make_pair(1, 2);
     
     // Struct assignment
-    p5: point := p1  // Copy
+    p5: point := p1;  // Copy
     
     // Struct comparison
-    same: bool := p1.x == p2.x && p1.y == p2.y
+    same: bool := p1.x == p2.x && p1.y == p2.y;
     
-    return 0
+    return 0;
 }

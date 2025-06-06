@@ -1,52 +1,52 @@
 // Pointers and arrays
 main: () i32 {
     // Basic pointer operations
-    x: i32 := 42
-    px: ptr[i32] := ^x
-    val: i32 := *px
+    x: i32 := 42;
+    px: ptr[i32] := ^x;
+    val: i32 := *px;
     
     // Mutable pointers
-    mut y: i32 := 100
-    py: mut ptr[i32] := ^y
-    *py = 200
+    mut y: i32 := 100;
+    py: mut ptr[i32] := ^y;
+    *py = 200;
     
     // Fixed-size arrays
-    arr: [5 i32] := {10, 20, 30, 40, 50}
-    first: i32 := arr[0]
-    last: i32 := arr[4]
+    arr: [5 i32] := [10, 20, 30, 40, 50];
+    first: i32 := arr[0];
+    last: i32 := arr[4];
     
     // Mutable arrays
-    mut marr: [3 i32] := {1, 2, 3}
-    marr[1] = 99
+    mut marr: [3 i32] := [1, 2, 3];
+    marr[1] = 99;
     
     // Pointer arithmetic
-    p: ptr[i32] := ^arr[0]
-    p2: ptr[i32] := p + 2
-    val2: i32 := *p2  // Should be 30
+    p: ptr[i32] := ^arr[0];
+    p2: ptr[i32] := p + 2;
+    val2: i32 := *p2;  // Should be 30
     
     // Pointer difference
-    diff: int := p2 - p  // Should be 2
+    diff: int := p2 - p;  // Should be 2
     
     // Array iteration with for-in
-    mut sum: i32 := 0
+    mut sum: i32 := 0;
     for n in arr {
-        sum += n
+        sum += n;
     }
     
     // Mutable iteration
     for mut p in marr {
-        *p = *p * 2
+        *p = *p * 2;
     }
     
     // Null pointers
-    null_ptr: ptr[i32] := 0 as ptr[i32]
+    null_ptr: ptr[i32] := 0 as ptr[i32];
     
     // Pointer to pointer
-    ppx: ptr[ptr[i32]] := ^px
-    val3: i32 := **ppx
+    ppx: ptr[ptr[i32]] := ^px;
+    val3: i32 := **ppx;
     
     // Array of pointers
-    parr: [3 ptr[i32]] := {^arr[0], ^arr[1], ^arr[2]}
+    parr: [3 ptr[i32]] := [^arr[0], ^arr[1], ^arr[2]];
     
-    return 0
+    return 0;
 }

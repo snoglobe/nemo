@@ -1,0 +1,218 @@
+// Whitespace and comments
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
+
+// Keywords as explicit tokens
+return_kw = @{ "return" ~ !(ASCII_ALPHANUMERIC | "_") }
+break_kw = @{ "break" ~ !(ASCII_ALPHANUMERIC | "_") }
+continue_kw = @{ "continue" ~ !(ASCII_ALPHANUMERIC | "_") }
+if_kw = @{ "if" ~ !(ASCII_ALPHANUMERIC | "_") }
+else_kw = @{ "else" ~ !(ASCII_ALPHANUMERIC | "_") }
+while_kw = @{ "while" ~ !(ASCII_ALPHANUMERIC | "_") }
+for_kw = @{ "for" ~ !(ASCII_ALPHANUMERIC | "_") }
+match_kw = @{ "match" ~ !(ASCII_ALPHANUMERIC | "_") }
+mut_kw = @{ "mut" ~ !(ASCII_ALPHANUMERIC | "_") }
+struct_kw = @{ "struct" ~ !(ASCII_ALPHANUMERIC | "_") }
+enum_kw = @{ "enum" ~ !(ASCII_ALPHANUMERIC | "_") }
+type_kw = @{ "type" ~ !(ASCII_ALPHANUMERIC | "_") }
+where_kw = @{ "where" ~ !(ASCII_ALPHANUMERIC | "_") }
+static_kw = @{ "static" ~ !(ASCII_ALPHANUMERIC | "_") }
+in_kw = @{ "in" ~ !(ASCII_ALPHANUMERIC | "_") }
+as_kw = @{ "as" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+// Identifiers - simple pattern, but must not start with a keyword
+identifier = @{ 
+    !(return_kw | break_kw | continue_kw | if_kw | else_kw | while_kw | 
+      for_kw | match_kw | mut_kw | struct_kw | enum_kw | type_kw | 
+      where_kw | static_kw | in_kw | as_kw | "true" | "false" | "nil" | 
+      "self" | "ptr" | "sizeof" | "never") ~
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* 
+}
+
+// Keywords must be listed before identifier
+keyword = { 
+    "as" | "break" | "continue" | "else" | "enum" | "false" | "for" | "if" | 
+    "in" | "match" | "mut" | "nil" | "ptr" | "return" | "self" | "sizeof" | 
+    "static" | "struct" | "true" | "type" | "where" | "while" | "never"
+}
+
+// Literals
+int_literal = @{
+    ("0x" ~ ASCII_HEX_DIGIT+) |
+    ("0b" ~ ("0" | "1")+) |
+    ASCII_DIGIT+
+}
+float_literal = @{
+    ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? |
+    ASCII_DIGIT+ ~ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+
+}
+bool_literal = { "true" | "false" }
+string_literal = @{ "\"" ~ (!"\"" ~ ANY | "\\" ~ ANY)* ~ "\"" }
+
+// Type expressions
+type_expr = { type_union }
+type_union = { type_intersection ~ ("|" ~ type_intersection)* }
+type_intersection = { type_primary ~ ("&" ~ type_primary)* }
+
+type_primary = {
+    never_type |
+    ptr_type |
+    array_type |
+    struct_type |
+    enum_type |
+    function_type |
+    type_name |
+    "(" ~ type_expr ~ ")"
+}
+
+never_type = { "never" }
+ptr_type = { mut_kw? ~ "ptr" ~ "[" ~ type_expr ~ "]" }
+array_type = { "[" ~ (expr ~ type_expr | type_expr) ~ "]" }
+struct_type = { struct_kw ~ "{" ~ struct_members ~ "}" }
+enum_type = { enum_kw ~ (":" ~ type_name)? ~ "{" ~ enum_variants ~ "}" }
+function_type = { "(" ~ param_list? ~ ")" ~ type_expr }
+
+type_name = { identifier ~ generic_args? }
+generic_args = { "[" ~ generic_arg ~ ("," ~ generic_arg)* ~ "]" }
+generic_arg = { type_expr | expr }
+
+// Struct members
+struct_members = { (struct_field | method_decl)* }
+struct_field = { identifier ~ ":" ~ type_expr ~ "," }
+method_decl = { identifier ~ generic_params? ~ ":" ~ function_type ~ where_clause? ~ block }
+
+// Enum variants
+enum_variants = { enum_variant ~ ("," ~ enum_variant)* ~ ","? }
+enum_variant = { identifier ~ ((":" ~ type_expr) | ("=" ~ expr))? }
+
+// Parameters
+param_list = { param ~ ("," ~ param)* }
+param = { 
+    mut_kw? ~ "self" |
+    mut_kw? ~ identifier ~ ":" ~ type_expr
+}
+
+// Generic parameters
+generic_params = { "[" ~ generic_param ~ ("," ~ generic_param)* ~ "]" }
+generic_param = {
+    static_kw ~ identifier ~ ":" ~ type_expr |
+    identifier ~ (":" ~ type_expr)?
+}
+
+// Where clause
+where_clause = { where_kw ~ constraint ~ ("," ~ constraint)* }
+constraint = { identifier ~ ":" ~ type_expr }
+
+// Expressions
+expr = { cast_expr }
+
+cast_expr = { assignment_expr ~ (as_kw ~ type_expr)? }
+
+assignment_expr = { logical_or_expr ~ (assignment_op ~ assignment_expr)? }
+assignment_op = { "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "=" }
+
+logical_or_expr = { logical_and_expr ~ ("||" ~ logical_and_expr)* }
+logical_and_expr = { bitwise_or_expr ~ ("&&" ~ bitwise_or_expr)* }
+bitwise_or_expr = { bitwise_xor_expr ~ ("|" ~ bitwise_xor_expr)* }
+bitwise_xor_expr = { bitwise_and_expr ~ ("^" ~ bitwise_and_expr)* }
+bitwise_and_expr = { equality_expr ~ ("&" ~ equality_expr)* }
+equality_expr = { relational_expr ~ (("==" | "!=") ~ relational_expr)* }
+relational_expr = { shift_expr ~ (("<=" | ">=" | "<" | ">") ~ shift_expr)* }
+shift_expr = { additive_expr ~ (("<<" | ">>") ~ additive_expr)* }
+additive_expr = { multiplicative_expr ~ (("+" | "-") ~ multiplicative_expr)* }
+multiplicative_expr = { unary_expr ~ (("*" | "/" | "%") ~ unary_expr)* }
+
+unary_expr = { unary_op ~ unary_expr | postfix_expr }
+unary_op = { "+" | "-" | "~" | "!" | "*" | "^" }
+
+postfix_expr = { primary_expr ~ postfix_op* }
+postfix_op = {
+    "[" ~ expr ~ "]" |
+    "(" ~ expr_list? ~ ")" |
+    "." ~ identifier |
+    generic_args
+}
+
+primary_expr = {
+    identifier |
+    float_literal |
+    int_literal |
+    bool_literal |
+    string_literal |
+    "nil" |
+    sizeof_expr |
+    struct_literal |
+    function_literal |
+    if_expr |
+    match_expr |
+    "(" ~ expr ~ ")"
+}
+
+expr_list = { expr ~ ("," ~ expr)* }
+
+sizeof_expr = { "sizeof" ~ (type_expr | expr) }
+struct_literal = { "{" ~ field_init_list? ~ "}" }
+field_init_list = { field_init ~ ("," ~ field_init)* }
+field_init = { identifier ~ ":" ~ expr }
+
+function_literal = { "|" ~ param_list? ~ "|" ~ type_expr ~ block }
+
+if_expr = { if_kw ~ expr ~ block ~ else_kw ~ (if_expr | block) }
+match_expr = { match_kw ~ type_kw? ~ expr ~ "{" ~ match_arms ~ "}" }
+match_arms = { match_arm* }
+match_arm = { pattern ~ ":" ~ (block | expr ~ ",") }
+
+// Patterns
+pattern = { 
+    identifier |
+    type_pattern |
+    literal_pattern |
+    "_"
+}
+type_pattern = { type_expr ~ "." ~ identifier }
+literal_pattern = { int_literal | float_literal | bool_literal | string_literal }
+
+// Statements
+stmt = {
+    return_stmt |
+    break_stmt |
+    continue_stmt |
+    decl_stmt |
+    if_stmt |
+    while_stmt |
+    for_stmt |
+    match_stmt |
+    labeled_stmt |
+    block_stmt |
+    expr_stmt
+}
+
+expr_stmt = { expr ~ ";" }
+decl_stmt = { mut_kw? ~ identifier ~ ":" ~ type_expr ~ ":=" ~ expr ~ ";" }
+block_stmt = { block }
+if_stmt = { if_kw ~ expr ~ block ~ (else_kw ~ (if_stmt | block))? }
+while_stmt = { label? ~ while_kw ~ expr ~ block }
+for_stmt = { label? ~ (for_in_stmt | for_c_stmt) }
+for_in_stmt = { for_kw ~ mut_kw? ~ identifier ~ in_kw ~ expr ~ block }
+for_c_stmt = { for_kw ~ for_init? ~ ";" ~ expr? ~ ";" ~ expr? ~ block }
+for_init = { mut_kw? ~ identifier ~ ":" ~ type_expr ~ ":=" ~ expr }
+match_stmt = { match_kw ~ type_kw? ~ expr ~ "{" ~ match_arms ~ "}" }
+return_stmt = { return_kw ~ expr? ~ ";" }
+break_stmt = { break_kw ~ label? ~ ";" }
+continue_stmt = { continue_kw ~ label? ~ ";" }
+labeled_stmt = { label ~ ":" ~ stmt }
+
+label = { identifier }
+block = { "{" ~ stmt* ~ "}" }
+
+// Top-level items
+program = { SOI ~ top_level_item* ~ EOI }
+top_level_item = {
+    type_decl |
+    function_decl |
+    static_decl
+}
+
+type_decl = { identifier ~ generic_params? ~ ":" ~ type_kw ~ ":=" ~ type_expr }
+function_decl = { identifier ~ generic_params? ~ ":" ~ function_type ~ where_clause? ~ block? }
+static_decl = { static_kw ~ identifier ~ generic_params? ~ ":" ~ type_expr ~ where_clause? ~ ":=" ~ expr }
