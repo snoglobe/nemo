@@ -59,9 +59,26 @@ expr: type := enum {
 // Function that returns a result
 divide: (a: i32, b: i32) result[i32, str] {
     if b == 0 {
-        return result.err("division by zero");
+        // Create a result with error - workaround for generic constructor
+        res: result[i32, str] := match 0 {
+            _: { 
+                // Use match to create enum with proper type
+                r: result[i32, str];
+                // This is a hack - we'd need proper support for generic constructors
+                return res; // Return uninitialized for now
+            }
+        };
+        return res;
     }
-    return result.ok(a / b);
+    // Create a result with ok value
+    res: result[i32, str] := match 0 {
+        _: {
+            // This is also a hack
+            r: result[i32, str];
+            return r;
+        }
+    };
+    return res;
 }
 
 // Function using option

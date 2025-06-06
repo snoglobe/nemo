@@ -186,7 +186,65 @@ impl TypeChecker {
     fn check_type_decl(&mut self, decl: &TypeDecl) -> Result<()> {
         self.push_generics(&decl.generics);
         self.validate_type_expr(&decl.type_expr)?;
+        
+        // Check methods in enum/struct declarations
+        match &decl.type_expr {
+            TypeExpr::Enum { methods, .. } | TypeExpr::Struct { methods, .. } => {
+                let self_type = TypeExpr::Name(decl.name.clone(), 
+                    decl.generics.iter().map(|g| match g {
+                        GenericParam::Type { name, .. } => GenericArg::Type(TypeExpr::Name(name.clone(), vec![])),
+                        GenericParam::Static { name, type_expr } => GenericArg::Type(type_expr.clone()),
+                    }).collect()
+                );
+                
+                for method in methods {
+                    self.check_method_decl(method, &self_type)?;
+                }
+            }
+            _ => {}
+        }
+        
         self.pop_generics(&decl.generics);
+        Ok(())
+    }
+    
+    fn check_method_decl(&mut self, method: &MethodDecl, self_type: &TypeExpr) -> Result<()> {
+        self.push_generics(&method.generics);
+        
+        // Check parameter types
+        for param in &method.params {
+            if let Some(ref type_expr) = param.type_expr {
+                self.validate_type_expr(type_expr)?;
+            }
+        }
+        
+        // Check return type
+        self.validate_type_expr(&method.return_type)?;
+        
+        // Check where clause
+        for constraint in &method.where_clause {
+            self.validate_type_expr(&constraint.type_expr)?;
+        }
+        
+        // Check method body
+        self.push_scope();
+        
+        // Add parameters to scope, including self
+        for param in &method.params {
+            if param.name == "self" {
+                // Add self with the containing type
+                self.add_var("self", self_type.clone(), param.mutable)?;
+            } else if let Some(ref type_expr) = param.type_expr {
+                self.add_var(&param.name, type_expr.clone(), param.mutable)?;
+            }
+        }
+        
+        self.current_return_type = Some(method.return_type.clone());
+        let _ = self.check_block(&method.body)?;
+        self.current_return_type = None;
+        
+        self.pop_scope();
+        self.pop_generics(&method.generics);
         Ok(())
     }
     
@@ -322,8 +380,26 @@ impl TypeChecker {
                         return Ok(());
                     }
                     // Struct literal assignments
-                    (Expr::StructLiteral { fields }, _) => {
-                        // TODO: Handle struct literals with type context
+                    (Expr::StructLiteral { fields }, TypeExpr::Struct { fields: struct_fields, .. }) => {
+                        // Check that all required fields are present and have correct types
+                        for struct_field in struct_fields {
+                            if let Some((_, field_expr)) = fields.iter().find(|(name, _)| name == &struct_field.name) {
+                                let field_type = self.infer_expr_type(field_expr)?;
+                                self.check_type_compatibility(&field_type, &struct_field.type_expr)?;
+                            } else {
+                                return Err(anyhow!("Missing field '{}' in struct literal", struct_field.name));
+                            }
+                        }
+                        
+                        // Check that no extra fields are present
+                        for (field_name, _) in fields {
+                            if !struct_fields.iter().any(|f| &f.name == field_name) {
+                                return Err(anyhow!("Unknown field '{}' in struct literal", field_name));
+                            }
+                        }
+                        
+                        self.add_var(name, type_expr.clone(), *mutable)?;
+                        return Ok(());
                     }
                     _ => {}
                 }
@@ -418,7 +494,8 @@ impl TypeChecker {
                 
                 if *is_type {
                     // Type match - check that expr is an enum
-                    match &expr_type {
+                    let resolved_type = self.resolve_type(&expr_type)?;
+                    match &resolved_type {
                         TypeExpr::Enum { .. } => {
                             // TODO: Check exhaustiveness
                             for arm in arms {
@@ -846,7 +923,7 @@ impl TypeChecker {
                 // TODO: Check methods
                 Ok(())
             }
-            TypeExpr::Enum { variants, .. } => {
+            TypeExpr::Enum { variants, backing_type, methods } => {
                 for variant in variants {
                     match &variant.data {
                         EnumVariantData::Type(type_expr) => self.validate_type_expr(type_expr)?,
@@ -1049,7 +1126,7 @@ impl TypeChecker {
                 }
                 Err(anyhow!("No field or method '{}' in struct", field_name))
             }
-            TypeExpr::Enum { variants, methods, .. } => {
+            TypeExpr::Enum { variants, backing_type, methods } => {
                 // First check if the field name matches a variant
                 for variant in variants {
                     if variant.name == field_name {
@@ -1071,34 +1148,75 @@ impl TypeChecker {
                 }
                 Err(anyhow!("No variant or method '{}' in enum", field_name))
             }
-            TypeExpr::Name(name, _) => {
+            TypeExpr::Name(name, args) => {
                 // Look up type definition
                 if let Some(typedef) = self.types.get(name) {
-                    // If this is accessing a field on the type itself (not an instance),
-                    // check if it's an enum variant constructor
+                    // Check if this is accessing a field on an instance of the type
                     match &typedef.type_expr {
-                        TypeExpr::Enum { variants, .. } => {
-                            // Check if the field name matches a variant for constructor
+                        TypeExpr::Enum { variants, backing_type, methods } => {
+                            // First check methods (for instance access like v.get())
+                            for method in methods {
+                                if method.name == field_name {
+                                    return Ok(TypeExpr::Function {
+                                        params: method.params.clone(),
+                                        return_type: Box::new(method.return_type.clone()),
+                                    });
+                                }
+                            }
+                            
+                            // Then check variants (for instance field access like v.int_val)
+                            for variant in variants {
+                                if variant.name == field_name {
+                                    match &variant.data {
+                                        EnumVariantData::Type(type_expr) => return Ok(type_expr.clone()),
+                                        EnumVariantData::Unit => return Ok(TypeExpr::Name("nil".to_string(), vec![])),
+                                        EnumVariantData::Value(_) => return Err(anyhow!("Cannot access numeric enum variant as field")),
+                                    }
+                                }
+                            }
+                            
+                            // Finally check if this is a variant constructor (for type access like value.int_val(...))
+                            // This happens when accessing the type name itself, not an instance
+                            // We can distinguish by checking if this is being called with arguments
                             for variant in variants {
                                 if variant.name == field_name {
                                     // Return a constructor function for this variant
                                     match &variant.data {
                                         EnumVariantData::Type(variant_type) => {
+                                            // If the enum is generic, we need to instantiate the variant type
+                                            let instantiated_variant_type = if !args.is_empty() && !typedef.generics.is_empty() {
+                                                // Create substitution map from generic params to args
+                                                let mut substitutions = HashMap::new();
+                                                for (i, param) in typedef.generics.iter().enumerate() {
+                                                    if let GenericParam::Type { name: param_name, .. } = param {
+                                                        if i < args.len() {
+                                                            if let GenericArg::Type(arg_type) = &args[i] {
+                                                                substitutions.insert(param_name.clone(), arg_type.clone());
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                // Apply substitutions to variant type
+                                                self.substitute_type(variant_type, &substitutions)
+                                            } else {
+                                                variant_type.clone()
+                                            };
+                                            
                                             // Constructor takes the variant data type and returns the enum type
                                             return Ok(TypeExpr::Function {
                                                 params: vec![Param {
                                                     mutable: false,
                                                     name: "value".to_string(),
-                                                    type_expr: Some(variant_type.clone()),
+                                                    type_expr: Some(instantiated_variant_type),
                                                 }],
-                                                return_type: Box::new(TypeExpr::Name(name.clone(), vec![])),
+                                                return_type: Box::new(TypeExpr::Name(name.clone(), args.clone())),
                                             });
                                         }
                                         EnumVariantData::Unit => {
                                             // Unit variant constructor takes no arguments
                                             return Ok(TypeExpr::Function {
                                                 params: vec![],
-                                                return_type: Box::new(TypeExpr::Name(name.clone(), vec![])),
+                                                return_type: Box::new(TypeExpr::Name(name.clone(), args.clone())),
                                             });
                                         }
                                         EnumVariantData::Value(_) => {
@@ -1107,11 +1225,30 @@ impl TypeChecker {
                                     }
                                 }
                             }
-                            // If we didn't find a variant, it's not a valid field
-                            return Err(anyhow!("No variant '{}' in enum type {}", field_name, name));
+                            
+                            // If we didn't find anything, it's not a valid field
+                            return Err(anyhow!("No method or variant '{}' in enum {}", field_name, name));
+                        }
+                        TypeExpr::Struct { fields, methods } => {
+                            // Check struct fields
+                            for field in fields {
+                                if field.name == field_name {
+                                    return Ok(field.type_expr.clone());
+                                }
+                            }
+                            // Check struct methods
+                            for method in methods {
+                                if method.name == field_name {
+                                    return Ok(TypeExpr::Function {
+                                        params: method.params.clone(),
+                                        return_type: Box::new(method.return_type.clone()),
+                                    });
+                                }
+                            }
+                            return Err(anyhow!("No field or method '{}' in struct {}", field_name, name));
                         }
                         _ => {
-                            // For non-enum types accessed as type names, 
+                            // For non-enum/struct types accessed as type names, 
                             // we don't support field access
                             return Err(anyhow!("Cannot access field '{}' on type {}", field_name, name));
                         }
@@ -1227,5 +1364,105 @@ impl TypeChecker {
             }
         }
         false
+    }
+    
+    // Substitute type parameters in a type expression
+    fn substitute_type(&self, type_expr: &TypeExpr, substitutions: &HashMap<String, TypeExpr>) -> TypeExpr {
+        match type_expr {
+            TypeExpr::Name(name, args) => {
+                // Check if this is a type parameter that should be substituted
+                if let Some(subst_type) = substitutions.get(name) {
+                    subst_type.clone()
+                } else {
+                    // Recursively substitute in generic arguments
+                    let new_args = args.iter().map(|arg| {
+                        match arg {
+                            GenericArg::Type(t) => GenericArg::Type(self.substitute_type(t, substitutions)),
+                            _ => arg.clone(),
+                        }
+                    }).collect();
+                    TypeExpr::Name(name.clone(), new_args)
+                }
+            }
+            TypeExpr::Ptr { mutable, inner } => {
+                TypeExpr::Ptr {
+                    mutable: *mutable,
+                    inner: Box::new(self.substitute_type(inner, substitutions)),
+                }
+            }
+            TypeExpr::Array { size, element } => {
+                TypeExpr::Array {
+                    size: size.clone(),
+                    element: Box::new(self.substitute_type(element, substitutions)),
+                }
+            }
+            TypeExpr::Function { params, return_type } => {
+                let new_params = params.iter().map(|p| {
+                    Param {
+                        mutable: p.mutable,
+                        name: p.name.clone(),
+                        type_expr: p.type_expr.as_ref().map(|t| self.substitute_type(t, substitutions)),
+                    }
+                }).collect();
+                TypeExpr::Function {
+                    params: new_params,
+                    return_type: Box::new(self.substitute_type(return_type, substitutions)),
+                }
+            }
+            TypeExpr::Struct { fields, methods } => {
+                let new_fields = fields.iter().map(|f| {
+                    StructField {
+                        name: f.name.clone(),
+                        type_expr: self.substitute_type(&f.type_expr, substitutions),
+                    }
+                }).collect();
+                // TODO: Handle method substitution if needed
+                TypeExpr::Struct {
+                    fields: new_fields,
+                    methods: methods.clone(),
+                }
+            }
+            TypeExpr::Enum { variants, backing_type, methods } => {
+                let new_variants = variants.iter().map(|v| {
+                    let new_data = match &v.data {
+                        EnumVariantData::Type(t) => EnumVariantData::Type(self.substitute_type(t, substitutions)),
+                        _ => v.data.clone(),
+                    };
+                    EnumVariant {
+                        name: v.name.clone(),
+                        data: new_data,
+                    }
+                }).collect();
+                // TODO: Handle method substitution if needed
+                TypeExpr::Enum {
+                    variants: new_variants,
+                    backing_type: backing_type.clone(),
+                    methods: methods.clone(),
+                }
+            }
+            TypeExpr::Union(types) => {
+                TypeExpr::Union(types.iter().map(|t| self.substitute_type(t, substitutions)).collect())
+            }
+            TypeExpr::Intersection(types) => {
+                TypeExpr::Intersection(types.iter().map(|t| self.substitute_type(t, substitutions)).collect())
+            }
+            TypeExpr::Never => TypeExpr::Never,
+        }
+    }
+    
+    // Resolve a type name to its definition
+    fn resolve_type(&self, type_expr: &TypeExpr) -> Result<TypeExpr> {
+        match type_expr {
+            TypeExpr::Name(name, args) => {
+                if let Some(typedef) = self.types.get(name) {
+                    // If there are generic arguments, we should substitute them
+                    // For now, just return the type definition
+                    Ok(typedef.type_expr.clone())
+                } else {
+                    Ok(type_expr.clone())
+                }
+            }
+            _ => Ok(type_expr.clone()),
+        }
     }
 }

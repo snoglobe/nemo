@@ -954,10 +954,14 @@ fn parse_postfix_expr(pair: Pair<Rule>) -> Result<Expr> {
                     }
                 } else if op_str.starts_with('.') {
                     // Field access: .identifier
-                    let field_name = op.into_inner().next().unwrap().as_str().to_string();
-                    Expr::Field {
-                        expr: Box::new(expr),
-                        field: field_name,
+                    if let Some(field_pair) = op.into_inner().next() {
+                        let field_name = field_pair.as_str().to_string();
+                        Expr::Field {
+                            expr: Box::new(expr),
+                            field: field_name,
+                        }
+                    } else {
+                        return Err(anyhow!("Field access missing identifier"));
                     }
                 } else {
                     // Generic args - ignore for now
@@ -972,6 +976,14 @@ fn parse_postfix_expr(pair: Pair<Rule>) -> Result<Expr> {
 }
 
 fn parse_primary_expr(pair: Pair<Rule>) -> Result<Expr> {
+    // Special case for self and nil which don't have inner content
+    if pair.as_str() == "self" {
+        return Ok(Expr::Identifier("self".to_string()));
+    }
+    if pair.as_str() == "nil" {
+        return Ok(Expr::Literal(Literal::Nil));
+    }
+    
     let inner = pair.into_inner().next().unwrap();
     
     match inner.as_rule() {
@@ -986,8 +998,6 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Result<Expr> {
         Rule::if_expr => parse_if_expr(inner),
         Rule::match_expr => parse_match_expr(inner),
         Rule::expr => parse_expr(inner),
-        _ if inner.as_str() == "nil" => Ok(Expr::Literal(Literal::Nil)),
-        _ if inner.as_str() == "self" => Ok(Expr::Identifier("self".to_string())),
         _ => unreachable!("Unexpected primary expr: {:?}", inner.as_rule()),
     }
 }
