@@ -1,4 +1,0 @@
-main: () i32 {
-    pi: float := 3.14;
-    return 0;
-}

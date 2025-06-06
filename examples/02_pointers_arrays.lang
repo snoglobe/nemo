@@ -11,12 +11,12 @@ main: () i32 {
     *py = 200;
     
     // Fixed-size arrays
-    arr: [5 i32] := [10, 20, 30, 40, 50];
+    arr: [5 i32] := {10, 20, 30, 40, 50};
     first: i32 := arr[0];
     last: i32 := arr[4];
     
     // Mutable arrays
-    mut marr: [3 i32] := [1, 2, 3];
+    mut marr: [3 i32] := {1, 2, 3};
     marr[1] = 99;
     
     // Pointer arithmetic
@@ -46,7 +46,7 @@ main: () i32 {
     val3: i32 := **ppx;
     
     // Array of pointers
-    parr: [3 ptr[i32]] := [^arr[0], ^arr[1], ^arr[2]];
+    parr: [3 ptr[i32]] := {^arr[0], ^arr[1], ^arr[2]};
     
     return 0;
 }

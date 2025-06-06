@@ -223,10 +223,12 @@ impl TypeChecker {
             }
             
             self.current_return_type = Some(decl.return_type.clone());
-            self.check_block(body)?;
+            let _ = self.check_block(body)?;
             self.current_return_type = None;
             
             self.pop_scope();
+        } else {
+            // No body = external function declaration
         }
         
         self.pop_generics(&decl.generics);
@@ -251,11 +253,18 @@ impl TypeChecker {
         Ok(())
     }
     
-    fn check_block(&mut self, block: &Block) -> Result<()> {
+    fn check_block(&mut self, block: &Block) -> Result<Option<TypeExpr>> {
         for stmt in &block.stmts {
             self.check_stmt(stmt)?;
         }
-        Ok(())
+        
+        // If the block has a final expression, check it and return its type
+        if let Some(ref expr) = block.expr {
+            let expr_type = self.infer_expr_type(expr)?;
+            Ok(Some(expr_type))
+        } else {
+            Ok(None)
+        }
     }
     
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<()> {
@@ -266,21 +275,68 @@ impl TypeChecker {
             }
             Stmt::Decl { mutable, name, type_expr, value } => {
                 self.validate_type_expr(type_expr)?;
-                let value_type = self.infer_expr_type(value)?;
                 
-                // Special handling for integer literal assignments
-                if self.can_assign_int_literal(value, type_expr) {
-                    self.add_var(name, type_expr.clone(), *mutable)?;
-                    return Ok(());
+                // Special handling for literals that need type context
+                match (value, type_expr) {
+                    // Integer literal assignments
+                    (Expr::Literal(Literal::Int(val)), TypeExpr::Name(type_name, _)) 
+                        if self.is_integer_type_name(type_name) => {
+                        if self.int_fits_in_type(*val, type_name) {
+                            self.add_var(name, type_expr.clone(), *mutable)?;
+                            return Ok(());
+                        }
+                    }
+                    // Unary minus on integer literal
+                    (Expr::Unary { op: UnaryOp::Minus, expr }, TypeExpr::Name(type_name, _))
+                        if self.is_integer_type_name(type_name) => {
+                        if let Expr::Literal(Literal::Int(val)) = expr.as_ref() {
+                            let neg_val = -(*val);
+                            if self.int_fits_in_type(neg_val, type_name) {
+                                self.add_var(name, type_expr.clone(), *mutable)?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                    // Array literal assignments
+                    (Expr::ArrayLiteral(elements), TypeExpr::Array { size, element }) => {
+                        // Check array size if specified
+                        if let Some(size_expr) = size {
+                            if let Expr::Literal(Literal::Int(expected_size)) = size_expr.as_ref() {
+                                if elements.len() != *expected_size as usize {
+                                    return Err(anyhow!(
+                                        "Array literal has {} elements but type expects {}",
+                                        elements.len(),
+                                        expected_size
+                                    ));
+                                }
+                            }
+                        }
+                        
+                        // Type check each element
+                        for elem in elements {
+                            let elem_type = self.infer_expr_type(elem)?;
+                            self.check_type_compatibility(&elem_type, element)?;
+                        }
+                        
+                        self.add_var(name, type_expr.clone(), *mutable)?;
+                        return Ok(());
+                    }
+                    // Struct literal assignments
+                    (Expr::StructLiteral { fields }, _) => {
+                        // TODO: Handle struct literals with type context
+                    }
+                    _ => {}
                 }
                 
+                // Default handling
+                let value_type = self.infer_expr_type(value)?;
                 self.check_type_compatibility(&value_type, type_expr)?;
                 self.add_var(name, type_expr.clone(), *mutable)?;
                 Ok(())
             }
             Stmt::Block(block) => {
                 self.push_scope();
-                self.check_block(block)?;
+                let _ = self.check_block(block)?;
                 self.pop_scope();
                 Ok(())
             }
@@ -289,7 +345,7 @@ impl TypeChecker {
                 self.check_type_compatibility(&cond_type, &TypeExpr::Name("bool".to_string(), vec![]))?;
                 
                 self.push_scope();
-                self.check_block(then_block)?;
+                let _ = self.check_block(then_block)?;
                 self.pop_scope();
                 
                 if let Some(else_stmt) = else_part {
@@ -303,7 +359,7 @@ impl TypeChecker {
                 
                 self.loop_labels.push(label.clone());
                 self.push_scope();
-                self.check_block(body)?;
+                let _ = self.check_block(body)?;
                 self.pop_scope();
                 self.loop_labels.pop();
                 Ok(())
@@ -352,7 +408,7 @@ impl TypeChecker {
                     }
                 }
                 
-                self.check_block(body)?;
+                let _ = self.check_block(body)?;
                 self.pop_scope();
                 self.loop_labels.pop();
                 Ok(())
@@ -446,7 +502,10 @@ impl TypeChecker {
         
         // Check arm body
         match &arm.body {
-            MatchArmBody::Block(block) => self.check_block(block)?,
+            MatchArmBody::Block(block) => {
+                self.check_block(block)?;
+                ()
+            }
             MatchArmBody::Expr(expr) => {
                 self.infer_expr_type(expr)?;
             }
@@ -496,6 +555,27 @@ impl TypeChecker {
                 match op {
                     // Arithmetic ops
                     Add | Sub | Mul | Div | Mod => {
+                        // Check for pointer arithmetic
+                        match (&left_type, &right_type, op) {
+                            // Pointer + integer
+                            (TypeExpr::Ptr { .. }, _, Add) => {
+                                self.check_integer_type(&right_type)?;
+                                return Ok(left_type);
+                            }
+                            // Pointer - integer
+                            (TypeExpr::Ptr { .. }, _, Sub) => {
+                                if let TypeExpr::Ptr { .. } = &right_type {
+                                    // Pointer - pointer = integer difference
+                                    return Ok(TypeExpr::Name("int".to_string(), vec![]));
+                                } else {
+                                    // Pointer - integer = pointer
+                                    self.check_integer_type(&right_type)?;
+                                    return Ok(left_type);
+                                }
+                            }
+                            _ => {}
+                        }
+                        
                         // Special handling for integer literals
                         if self.can_assign_int_literal(left, &right_type) {
                             self.check_numeric_type(&right_type)?;
@@ -644,6 +724,11 @@ impl TypeChecker {
                 let expr_type = self.infer_expr_type(expr)?;
                 self.lookup_field(&expr_type, field)
             }
+            Expr::ArrayLiteral(elements) => {
+                // Cannot infer array type from literal alone - need context
+                // This will be handled when we have better type inference
+                Err(anyhow!("Cannot infer type of array literal without context"))
+            }
             Expr::StructLiteral { fields } => {
                 // Cannot infer struct type from literal alone
                 Err(anyhow!("Cannot infer type of struct literal without context"))
@@ -661,7 +746,7 @@ impl TypeChecker {
                 // Check function body
                 let old_return_type = self.current_return_type.clone();
                 self.current_return_type = Some(return_type.clone());
-                self.check_block(body)?;
+                let _ = self.check_block(body)?;
                 self.current_return_type = old_return_type;
                 
                 self.pop_scope();

@@ -56,7 +56,7 @@ pub enum TypeExpr {
     Ptr { mutable: bool, inner: Box<TypeExpr> },
     Array { size: Option<Box<Expr>>, element: Box<TypeExpr> },
     Struct { fields: Vec<StructField>, methods: Vec<MethodDecl> },
-    Enum { backing_type: Option<String>, variants: Vec<EnumVariant> },
+    Enum { backing_type: Option<String>, variants: Vec<EnumVariant>, methods: Vec<MethodDecl> },
     Function { params: Vec<Param>, return_type: Box<TypeExpr> },
     Union(Vec<TypeExpr>),
     Intersection(Vec<TypeExpr>),
@@ -157,6 +157,7 @@ pub enum Pattern {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+    pub expr: Option<Box<Expr>>, // Final expression for expression blocks
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -168,6 +169,7 @@ pub enum Expr {
     Call { func: Box<Expr>, args: Vec<Expr> },
     Index { array: Box<Expr>, index: Box<Expr> },
     Field { expr: Box<Expr>, field: String },
+    ArrayLiteral(Vec<Expr>),
     StructLiteral { fields: Vec<(String, Expr)> },
     FunctionLiteral { params: Vec<Param>, return_type: TypeExpr, body: Block },
     If { condition: Box<Expr>, then_expr: Box<Expr>, else_expr: Box<Expr> },

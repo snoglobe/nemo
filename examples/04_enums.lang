@@ -45,12 +45,12 @@ expr: type := enum {
     // Method on enum
     eval: (self) i32 {
         match type self {
-            expr.literal: { return self.literal }
+            expr.literal: { return self.literal; }
             expr.add: { 
-                return (*self.add.left).eval() + (*self.add.right).eval()
+                return (*self.add.left).eval() + (*self.add.right).eval();
             }
             expr.mul: {
-                return (*self.mul.left).eval() * (*self.mul.right).eval()
+                return (*self.mul.left).eval() * (*self.mul.right).eval();
             }
         }
     }
@@ -59,75 +59,77 @@ expr: type := enum {
 // Function that returns a result
 divide: (a: i32, b: i32) result[i32, str] {
     if b == 0 {
-        return result.err("division by zero")
+        return result.err("division by zero");
     }
-    return result.ok(a / b)
+    return result.ok(a / b);
 }
 
 // Function using option
 find_first: (arr: [5 i32], value: i32) option[int] {
     for i: int := 0; i < 5; i += 1 {
         if arr[i] == value {
-            return option.some(i)
+            return option.some(i);
         }
     }
-    return option.none()
+    return option.none();
 }
 
 main: () i32 {
     // Using numeric enums
-    c: color := color.green
-    c2: color := color.blue
+    c: color := color.green;
+    c2: color := color.blue;
     
     // Numeric operations on enum
-    c_val: u8 := c as u8  // 1
-    combined: u8 := (c as u8) | (c2 as u8)  // 3
+    c_val: u8 := c as u8;  // 1
+    combined: u8 := (c as u8) | (c2 as u8);  // 3
     
     // Direction enum
-    dir: direction := direction.north
-    next_dir: direction := (((dir as i32) + 1) % 4) as direction
+    dir: direction := direction.north;
+    next_dir: direction := (((dir as i32) + 1) % 4) as direction;
     
     // Permissions (flags)
-    perm: permissions := permissions.read_write
-    has_read: bool := ((perm as u32) & (permissions.read as u32)) != 0
-    has_exec: bool := ((perm as u32) & (permissions.execute as u32)) != 0
+    perm: permissions := permissions.read_write;
+    has_read: bool := ((perm as u32) & (permissions.read as u32)) != 0;
+    has_exec: bool := ((perm as u32) & (permissions.execute as u32)) != 0;
     
     // Using result type
-    res1: result[i32, str] := divide(10, 2)
+    res1: result[i32, str] := divide(10, 2);
     match type res1 {
         result.ok: {
-            val: i32 := res1.ok  // Should be 5
+            val: i32 := res1.ok;  // Should be 5
         }
         result.err: {
-            msg: str := res1.err
+            msg: str := res1.err;
         }
     }
     
-    res2: result[i32, str] := divide(10, 0)
-    is_error: bool := match type res2 {
-        result.ok: { false },
-        result.err: { true }
+    res2: result[i32, str] := divide(10, 0);
+    mut is_error: bool := false;
+    match type res2 {
+        result.ok: { is_error = false; }
+        result.err: { is_error = true; }
     }
     
     // Using option type
-    arr: [5 i32] := {10, 20, 30, 40, 50}
-    opt: option[int] := find_first(arr, 30)
+    arr: [5 i32] := {10, 20, 30, 40, 50};
+    opt: option[int] := find_first(arr, 30);
     
-    index: int := match type opt {
-        option.some: { opt.some },
-        option.none: { -1 }
+    mut index: int := -1;
+    match type opt {
+        option.some: { index = opt.some; }
+        option.none: { index = -1; }
     }
     
     // Complex expression tree
     // Building: (2 + 3) * 4
-    lit2: expr := expr.literal(2)
-    lit3: expr := expr.literal(3)
-    lit4: expr := expr.literal(4)
+    lit2: expr := expr.literal(2);
+    lit3: expr := expr.literal(3);
+    lit4: expr := expr.literal(4);
     
-    add_expr: expr := expr.add({ left: ^lit2, right: ^lit3 })
-    mul_expr: expr := expr.mul({ left: ^add_expr, right: ^lit4 })
+    add_expr: expr := expr.add({ left: ^lit2, right: ^lit3 });
+    mul_expr: expr := expr.mul({ left: ^add_expr, right: ^lit4 });
     
-    result: i32 := mul_expr.eval()  // Should be 20
+    result: i32 := mul_expr.eval();  // Should be 20
     
-    return 0
+    return 0;
 }

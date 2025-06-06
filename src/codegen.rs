@@ -166,7 +166,7 @@ impl CodeGenerator {
                     self.generate_method_impl(&decl.name, method)?;
                 }
             }
-            TypeExpr::Enum { backing_type, variants } => {
+            TypeExpr::Enum { backing_type, variants, methods } => {
                 if let Some(backing) = backing_type {
                     // Numeric enum - generate constants
                     let c_type = self.c_type_name(backing);
@@ -271,6 +271,11 @@ impl CodeGenerator {
                             }
                             _ => {}
                         }
+                    }
+                    
+                    // Generate methods for enums
+                    for method in methods {
+                        self.generate_method_impl(&decl.name, method)?;
                     }
                 }
             }
@@ -379,6 +384,12 @@ impl CodeGenerator {
         
         for stmt in &block.stmts {
             self.generate_stmt(stmt)?;
+        }
+        
+        // If the block has a final expression, generate it
+        if let Some(ref expr) = block.expr {
+            self.generate_expr(expr)?;
+            self.emit_line(";");
         }
         
         self.dedent();
@@ -642,6 +653,16 @@ impl CodeGenerator {
                 self.generate_expr(expr)?;
                 self.emit(&format!(".{}", field));
             }
+            Expr::ArrayLiteral(elements) => {
+                self.emit("{");
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.generate_expr(elem)?;
+                }
+                self.emit("}");
+            }
             Expr::StructLiteral { fields } => {
                 self.emit("{");
                 for (i, (name, expr)) in fields.iter().enumerate() {
@@ -848,15 +869,15 @@ impl CodeGenerator {
     
     // Helper methods for output generation
     fn emit(&mut self, s: &str) {
-        for _ in 0..self.indent_level {
-            self.output.push_str("    ");
-        }
         self.output.push_str(s);
     }
     
     fn emit_line(&mut self, s: &str) {
+        for _ in 0..self.indent_level {
+            self.output.push_str("    ");
+        }
         if !s.is_empty() {
-            self.emit(s);
+            self.output.push_str(s);
         }
         self.output.push('\n');
     }

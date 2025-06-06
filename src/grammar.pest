@@ -70,20 +70,20 @@ ptr_type = { mut_kw? ~ "ptr" ~ "[" ~ type_expr ~ "]" }
 array_type = { "[" ~ (expr ~ type_expr | type_expr) ~ "]" }
 struct_type = { struct_kw ~ "{" ~ struct_members ~ "}" }
 enum_type = { enum_kw ~ (":" ~ type_name)? ~ "{" ~ enum_variants ~ "}" }
-function_type = { "(" ~ param_list? ~ ")" ~ type_expr }
+function_type = { "(" ~ param_list? ~ ")" ~ type_expr? }
 
 type_name = { identifier ~ generic_args? }
 generic_args = { "[" ~ generic_arg ~ ("," ~ generic_arg)* ~ "]" }
 generic_arg = { type_expr | expr }
 
 // Struct members
-struct_members = { (struct_field | method_decl)* }
-struct_field = { identifier ~ ":" ~ type_expr ~ "," }
+struct_members = { (method_decl | struct_field)* }
+struct_field = { identifier ~ ":" ~ type_expr ~ ","? }
 method_decl = { identifier ~ generic_params? ~ ":" ~ function_type ~ where_clause? ~ block }
 
 // Enum variants
-enum_variants = { enum_variant ~ ("," ~ enum_variant)* ~ ","? }
-enum_variant = { identifier ~ ((":" ~ type_expr) | ("=" ~ expr))? }
+enum_variants = { (method_decl | enum_variant)* }
+enum_variant = { identifier ~ ((":" ~ type_expr) | ("=" ~ expr))? ~ ","? }
 
 // Parameters
 param_list = { param ~ ("," ~ param)* }
@@ -135,13 +135,14 @@ postfix_op = {
 
 primary_expr = {
     identifier |
+    "self" |
     float_literal |
     int_literal |
     bool_literal |
     string_literal |
     "nil" |
     sizeof_expr |
-    struct_literal |
+    brace_literal |
     function_literal |
     if_expr |
     match_expr |
@@ -151,7 +152,8 @@ primary_expr = {
 expr_list = { expr ~ ("," ~ expr)* }
 
 sizeof_expr = { "sizeof" ~ (type_expr | expr) }
-struct_literal = { "{" ~ field_init_list? ~ "}" }
+brace_literal = { "{" ~ brace_content? ~ "}" }
+brace_content = { field_init_list | expr_list }
 field_init_list = { field_init ~ ("," ~ field_init)* }
 field_init = { identifier ~ ":" ~ expr }
 
@@ -164,9 +166,9 @@ match_arm = { pattern ~ ":" ~ (block | expr ~ ",") }
 
 // Patterns
 pattern = { 
-    identifier |
     type_pattern |
     literal_pattern |
+    identifier |
     "_"
 }
 type_pattern = { type_expr ~ "." ~ identifier }
@@ -203,7 +205,7 @@ continue_stmt = { continue_kw ~ label? ~ ";" }
 labeled_stmt = { label ~ ":" ~ stmt }
 
 label = { identifier }
-block = { "{" ~ stmt* ~ "}" }
+block = { "{" ~ stmt* ~ expr? ~ "}" }
 
 // Top-level items
 program = { SOI ~ top_level_item* ~ EOI }

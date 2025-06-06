@@ -51,7 +51,7 @@ rectangle: type := struct {
 }
 
 // Anonymous struct type
-make_pair: (a: i32, b: i32) struct { first: i32, second: i32 } {
+make_pair: (a: i32, b: i32) struct { first: i32, second: i32, } {
     return { first: a, second: b };
 }
 
@@ -85,7 +85,7 @@ main: () i32 {
     inside: bool := rect.contains(p1);
     
     // Anonymous struct
-    pair: struct { first: i32, second: i32 } := make_pair(1, 2);
+    pair: struct { first: i32, second: i32, } := make_pair(1, 2);
     
     // Struct assignment
     p5: point := p1;  // Copy

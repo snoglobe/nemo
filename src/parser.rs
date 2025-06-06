@@ -207,36 +207,35 @@ fn parse_type_expr(pair: Pair<Rule>) -> Result<TypeExpr> {
 }
 
 fn parse_type_primary(pair: Pair<Rule>) -> Result<TypeExpr> {
+    let rule = pair.as_rule();
     let inner = pair.into_inner().next().unwrap();
     
     match inner.as_rule() {
         Rule::never_type => Ok(TypeExpr::Never),
         Rule::ptr_type => {
             let mut inner = inner.into_inner();
-            let mutable = inner.as_str().contains("mut");
-            let inner_type = inner.find(|p| p.as_rule() == Rule::type_expr).unwrap();
-            Ok(TypeExpr::Ptr {
-                mutable,
-                inner: Box::new(parse_type_expr(inner_type)?),
-            })
+            let mutable = inner.peek().map(|p| p.as_str() == "mut").unwrap_or(false);
+            if mutable {
+                inner.next();
+            }
+            inner.next(); // skip "ptr"
+            let inner_type = parse_type_expr(inner.next().unwrap())?;
+            Ok(TypeExpr::Ptr { mutable, inner: Box::new(inner_type) })
         }
         Rule::array_type => {
             let mut inner = inner.into_inner();
             let first = inner.next().unwrap();
             
-            if first.as_rule() == Rule::expr {
-                let size = parse_expr(first)?;
-                let element = parse_type_expr(inner.next().unwrap())?;
-                Ok(TypeExpr::Array {
-                    size: Some(Box::new(size)),
-                    element: Box::new(element),
-                })
+            // Check if it's [size type] or just [type]
+            if inner.peek().is_some() {
+                // Has size
+                let size = Some(Box::new(parse_expr(first)?));
+                let element = Box::new(parse_type_expr(inner.next().unwrap())?);
+                Ok(TypeExpr::Array { size, element })
             } else {
-                let element = parse_type_expr(first)?;
-                Ok(TypeExpr::Array {
-                    size: None,
-                    element: Box::new(element),
-                })
+                // No size
+                let element = Box::new(parse_type_expr(first)?);
+                Ok(TypeExpr::Array { size: None, element })
             }
         }
         Rule::struct_type => {
@@ -246,18 +245,23 @@ fn parse_type_primary(pair: Pair<Rule>) -> Result<TypeExpr> {
         }
         Rule::enum_type => {
             let mut inner = inner.into_inner();
-            let mut backing_type = None;
-            let mut variants = Vec::new();
-            
-            for pair in inner {
-                match pair.as_rule() {
-                    Rule::type_name => backing_type = Some(pair.as_str().to_string()),
-                    Rule::enum_variants => variants = parse_enum_variants(pair)?,
-                    _ => {}
+            let backing_type = if let Some(first) = inner.peek() {
+                if first.as_rule() == Rule::identifier {
+                    Some(inner.next().unwrap().as_str().to_string())
+                } else {
+                    None
                 }
-            }
+            } else {
+                None
+            };
             
-            Ok(TypeExpr::Enum { backing_type, variants })
+            let (variants, methods) = if let Some(pair) = inner.next() {
+                parse_enum_variants(pair)?
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            
+            Ok(TypeExpr::Enum { backing_type, variants, methods })
         }
         Rule::function_type => {
             let (params, return_type) = parse_function_type(inner)?;
@@ -269,10 +273,11 @@ fn parse_type_primary(pair: Pair<Rule>) -> Result<TypeExpr> {
         Rule::type_name => {
             let mut inner = inner.into_inner();
             let name = inner.next().unwrap().as_str().to_string();
-            let args = inner.next()
-                .map(|p| parse_generic_args(p))
-                .transpose()?
-                .unwrap_or_default();
+            let args = if let Some(generic_args) = inner.next() {
+                parse_generic_args(generic_args)?
+            } else {
+                Vec::new()
+            };
             Ok(TypeExpr::Name(name, args))
         }
         _ => unreachable!("Unexpected type primary: {:?}", inner.as_rule()),
@@ -292,7 +297,9 @@ fn parse_function_type(pair: Pair<Rule>) -> Result<(Vec<Param>, TypeExpr)> {
         }
     }
     
-    Ok((params, return_type.unwrap()))
+    // Default return type is nil
+    let return_type = return_type.unwrap_or(TypeExpr::Name("nil".to_string(), vec![]));
+    Ok((params, return_type))
 }
 
 fn parse_param_list(pair: Pair<Rule>) -> Result<Vec<Param>> {
@@ -377,7 +384,7 @@ fn parse_method_decl(pair: Pair<Rule>) -> Result<MethodDecl> {
     
     let mut generics = Vec::new();
     let mut params = Vec::new();
-    let mut return_type = None;
+    let mut return_type = TypeExpr::Name("void".to_string(), Vec::new());
     let mut where_clause = Vec::new();
     let mut body = None;
     
@@ -387,7 +394,7 @@ fn parse_method_decl(pair: Pair<Rule>) -> Result<MethodDecl> {
             Rule::function_type => {
                 let (p, r) = parse_function_type(pair)?;
                 params = p;
-                return_type = Some(r);
+                return_type = r;
             }
             Rule::where_clause => where_clause = parse_where_clause(pair)?,
             Rule::block => body = Some(parse_block(pair)?),
@@ -399,22 +406,50 @@ fn parse_method_decl(pair: Pair<Rule>) -> Result<MethodDecl> {
         name,
         generics,
         params,
-        return_type: return_type.unwrap(),
+        return_type,
         where_clause,
         body: body.unwrap(),
     })
 }
 
-fn parse_enum_variants(pair: Pair<Rule>) -> Result<Vec<EnumVariant>> {
-    let mut variants = Vec::new();
+fn parse_block(pair: Pair<Rule>) -> Result<Block> {
+    let mut stmts = Vec::new();
+    let mut expr = None;
     
-    for variant in pair.into_inner() {
-        if variant.as_rule() == Rule::enum_variant {
-            variants.push(parse_enum_variant(variant)?);
+    let mut inner = pair.into_inner().peekable();
+    
+    while let Some(pair) = inner.next() {
+        match pair.as_rule() {
+            Rule::stmt => stmts.push(parse_stmt(pair)?),
+            Rule::expr => {
+                // If this is the last item, it's the block expression
+                if inner.peek().is_none() {
+                    expr = Some(Box::new(parse_expr(pair)?));
+                } else {
+                    // Otherwise, treat it as an expression statement
+                    stmts.push(Stmt::Expr(parse_expr(pair)?));
+                }
+            }
+            _ => {}
         }
     }
     
-    Ok(variants)
+    Ok(Block { stmts, expr })
+}
+
+fn parse_enum_variants(pair: Pair<Rule>) -> Result<(Vec<EnumVariant>, Vec<MethodDecl>)> {
+    let mut variants = Vec::new();
+    let mut methods = Vec::new();
+    
+    for item in pair.into_inner() {
+        match item.as_rule() {
+            Rule::enum_variant => variants.push(parse_enum_variant(item)?),
+            Rule::method_decl => methods.push(parse_method_decl(item)?),
+            _ => {}
+        }
+    }
+    
+    Ok((variants, methods))
 }
 
 fn parse_enum_variant(pair: Pair<Rule>) -> Result<EnumVariant> {
@@ -439,18 +474,6 @@ fn parse_enum_variant(pair: Pair<Rule>) -> Result<EnumVariant> {
     };
     
     Ok(EnumVariant { name, data })
-}
-
-fn parse_block(pair: Pair<Rule>) -> Result<Block> {
-    let mut stmts = Vec::new();
-    
-    for stmt in pair.into_inner() {
-        if stmt.as_rule() == Rule::stmt {
-            stmts.push(parse_stmt(stmt)?);
-        }
-    }
-    
-    Ok(Block { stmts })
 }
 
 fn parse_stmt(pair: Pair<Rule>) -> Result<Stmt> {
@@ -525,11 +548,11 @@ fn parse_stmt(pair: Pair<Rule>) -> Result<Stmt> {
             let (label, kind, body) = if first.as_rule() == Rule::label {
                 let label = Some(first.as_str().to_string());
                 let kind_pair = inner.next().unwrap();
-                let body = parse_block(inner.next().unwrap())?;
-                (label, parse_for_kind(kind_pair)?, body)
+                let (kind, body) = parse_for_kind_with_body(kind_pair)?;
+                (label, kind, body)
             } else {
-                let body = parse_block(inner.next().unwrap())?;
-                (None, parse_for_kind(first)?, body)
+                let (kind, body) = parse_for_kind_with_body(first)?;
+                (None, kind, body)
             };
             
             Ok(Stmt::For { label, kind, body })
@@ -570,30 +593,37 @@ fn parse_stmt(pair: Pair<Rule>) -> Result<Stmt> {
     }
 }
 
-fn parse_for_kind(pair: Pair<Rule>) -> Result<ForKind> {
+fn parse_for_kind_with_body(pair: Pair<Rule>) -> Result<(ForKind, Block)> {
     match pair.as_rule() {
         Rule::for_in_stmt => {
             let mut inner = pair.into_inner();
-            inner.next(); // skip "for"
+            
+            // Skip for_kw
+            inner.next(); // Skip "for"
             
             let first = inner.next().unwrap();
-            let (mutable, var) = if first.as_str() == "mut" {
+            let (mutable, var) = if first.as_rule() == Rule::mut_kw {
                 (true, inner.next().unwrap().as_str().to_string())
             } else {
                 (false, first.as_str().to_string())
             };
             
-            let iter = parse_expr(inner.next().unwrap())?;
+            // Skip the "in" keyword
+            inner.next(); // This should be in_kw
             
-            Ok(ForKind::In { mutable, var, iter })
+            let iter = parse_expr(inner.next().unwrap())?;
+            let body = parse_block(inner.next().unwrap())?;
+            
+            Ok((ForKind::In { mutable, var, iter }, body))
         }
         Rule::for_c_stmt => {
             let mut inner = pair.into_inner();
-            inner.next(); // skip "for"
+            // Don't skip "for" - it's not included as a separate token
             
             let mut init = None;
             let mut condition = None;
             let mut update = None;
+            let mut body = None;
             
             for pair in inner {
                 match pair.as_rule() {
@@ -605,11 +635,12 @@ fn parse_for_kind(pair: Pair<Rule>) -> Result<ForKind> {
                             update = Some(parse_expr(pair)?);
                         }
                     }
+                    Rule::block => body = Some(parse_block(pair)?),
                     _ => {}
                 }
             }
             
-            Ok(ForKind::C { init, condition, update })
+            Ok((ForKind::C { init, condition, update }, body.unwrap()))
         }
         _ => unreachable!("Unexpected for kind: {:?}", pair.as_rule()),
     }
@@ -747,37 +778,97 @@ fn parse_assignment_expr(pair: Pair<Rule>) -> Result<Expr> {
 }
 
 fn parse_binary_expr(pair: Pair<Rule>, ops: &[BinaryOp]) -> Result<Expr> {
+    let span = pair.as_span();
+    let text = span.as_str();
     let mut inner = pair.into_inner();
     let mut left = parse_expr(inner.next().unwrap())?;
     
     // For binary expressions, the grammar produces pairs like:
     // left_expr, right_expr, right_expr, ...
-    // The operator is implicit in the grammar rule and position
-    let mut operands = vec![left];
-    while let Some(right) = inner.next() {
-        operands.push(parse_expr(right)?);
-    }
-    
-    // If we only have one operand, return it
-    if operands.len() == 1 {
-        return Ok(operands.into_iter().next().unwrap());
-    }
-    
-    // Build the expression left-to-right with the appropriate operator
-    // Since all operators in ops[] have the same precedence and are left-associative
-    let mut expr = operands[0].clone();
-    for i in 1..operands.len() {
-        // Determine which operator to use based on the rule and position
-        // For now, use the first operator in the list (they should all be the same for a given rule)
-        let op = ops[0];
-        expr = Expr::Binary {
+    // The operator is between each pair
+    while let Some(right_pair) = inner.next() {
+        let right = parse_expr(right_pair)?;
+        
+        // Determine which operator was used by looking at the text
+        let op = determine_operator(text, ops)?;
+        
+        left = Expr::Binary {
             op,
-            left: Box::new(expr),
-            right: Box::new(operands[i].clone()),
+            left: Box::new(left),
+            right: Box::new(right),
         };
     }
     
-    Ok(expr)
+    Ok(left)
+}
+
+// Helper function to determine which operator was used
+fn determine_operator(text: &str, ops: &[BinaryOp]) -> Result<BinaryOp> {
+    use BinaryOp::*;
+    
+    // Check each possible operator
+    for &op in ops {
+        let op_str = match op {
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            Mod => "%",
+            BitAnd => "&",
+            BitOr => "|",
+            BitXor => "^",
+            Shl => "<<",
+            Shr => ">>",
+            Eq => "==",
+            Ne => "!=",
+            Le => "<=",
+            Ge => ">=",
+            Lt => "<",
+            Gt => ">",
+            And => "&&",
+            Or => "||",
+            _ => continue,
+        };
+        
+        // Check if this operator appears in the text
+        if text.contains(op_str) {
+            // Make sure it's not part of a larger operator
+            match op {
+                Lt => {
+                    // Make sure it's not << or <=
+                    if !text.contains("<<") && !text.contains("<=") {
+                        return Ok(op);
+                    }
+                }
+                Gt => {
+                    // Make sure it's not >> or >=
+                    if !text.contains(">>") && !text.contains(">=") {
+                        return Ok(op);
+                    }
+                }
+                BitAnd => {
+                    // Make sure it's not &&
+                    let count_single = text.matches('&').count();
+                    let count_double = text.matches("&&").count();
+                    if count_single > count_double * 2 {
+                        return Ok(op);
+                    }
+                }
+                BitOr => {
+                    // Make sure it's not ||
+                    let count_single = text.matches('|').count();
+                    let count_double = text.matches("||").count();
+                    if count_single > count_double * 2 {
+                        return Ok(op);
+                    }
+                }
+                _ => return Ok(op),
+            }
+        }
+    }
+    
+    // If we can't find an operator, default to the first one (shouldn't happen)
+    Ok(ops[0])
 }
 
 fn parse_unary_expr(pair: Pair<Rule>) -> Result<Expr> {
@@ -812,26 +903,40 @@ fn parse_postfix_expr(pair: Pair<Rule>) -> Result<Expr> {
     for op in inner {
         expr = match op.as_rule() {
             Rule::postfix_op => {
-                let op_inner = op.into_inner().next().unwrap();
-                match op_inner.as_rule() {
-                    Rule::expr => Expr::Index {
+                // postfix_op is the actual operation, not a wrapper
+                // Check what's inside this specific postfix_op
+                let op_str = op.as_str();
+                if op_str.starts_with('[') {
+                    // Array index: [expr]
+                    let index_expr = op.into_inner().next().unwrap();
+                    Expr::Index {
                         array: Box::new(expr),
-                        index: Box::new(parse_expr(op_inner)?),
-                    },
-                    Rule::expr_list => Expr::Call {
-                        func: Box::new(expr),
-                        args: parse_expr_list(op_inner)?,
-                    },
-                    Rule::identifier => Expr::Field {
-                        expr: Box::new(expr),
-                        field: op_inner.as_str().to_string(),
-                    },
-                    Rule::generic_args => {
-                        // Handle generic instantiation
-                        // For now, we'll ignore this in expressions
-                        expr
+                        index: Box::new(parse_expr(index_expr)?),
                     }
-                    _ => unreachable!("Unexpected postfix op: {:?}", op_inner.as_rule()),
+                } else if op_str.starts_with('(') {
+                    // Function call: (expr_list?)
+                    if let Some(expr_list) = op.into_inner().next() {
+                        Expr::Call {
+                            func: Box::new(expr),
+                            args: parse_expr_list(expr_list)?,
+                        }
+                    } else {
+                        // Empty call
+                        Expr::Call {
+                            func: Box::new(expr),
+                            args: vec![],
+                        }
+                    }
+                } else if op_str.starts_with('.') {
+                    // Field access: .identifier
+                    let field_name = op.into_inner().next().unwrap().as_str().to_string();
+                    Expr::Field {
+                        expr: Box::new(expr),
+                        field: field_name,
+                    }
+                } else {
+                    // Generic args - ignore for now
+                    expr
                 }
             }
             _ => unreachable!("Expected postfix_op, got {:?}", op.as_rule()),
@@ -851,12 +956,13 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Result<Expr> {
         Rule::bool_literal => Ok(Expr::Literal(parse_bool_literal(inner)?)),
         Rule::string_literal => Ok(Expr::Literal(parse_string_literal(inner)?)),
         Rule::sizeof_expr => parse_sizeof_expr(inner),
-        Rule::struct_literal => parse_struct_literal(inner),
+        Rule::brace_literal => parse_brace_literal(inner),
         Rule::function_literal => parse_function_literal(inner),
         Rule::if_expr => parse_if_expr(inner),
         Rule::match_expr => parse_match_expr(inner),
         Rule::expr => parse_expr(inner),
         _ if inner.as_str() == "nil" => Ok(Expr::Literal(Literal::Nil)),
+        _ if inner.as_str() == "self" => Ok(Expr::Identifier("self".to_string())),
         _ => unreachable!("Unexpected primary expr: {:?}", inner.as_rule()),
     }
 }
@@ -885,21 +991,45 @@ fn parse_sizeof_expr(pair: Pair<Rule>) -> Result<Expr> {
     Ok(Expr::Sizeof(operand))
 }
 
-fn parse_struct_literal(pair: Pair<Rule>) -> Result<Expr> {
-    let mut fields = Vec::new();
-    
-    if let Some(field_list) = pair.into_inner().next() {
-        for field in field_list.into_inner() {
-            if field.as_rule() == Rule::field_init {
-                let mut inner = field.into_inner();
-                let name = inner.next().unwrap().as_str().to_string();
-                let expr = parse_expr(inner.next().unwrap())?;
-                fields.push((name, expr));
+fn parse_brace_literal(pair: Pair<Rule>) -> Result<Expr> {
+    if let Some(content) = pair.into_inner().next() {
+        match content.as_rule() {
+            Rule::brace_content => {
+                // Need to determine if it's field_init_list or expr_list
+                if let Some(inner) = content.into_inner().next() {
+                    match inner.as_rule() {
+                        Rule::field_init_list => {
+                            // It's a struct literal
+                            let mut fields = Vec::new();
+                            for field in inner.into_inner() {
+                                if field.as_rule() == Rule::field_init {
+                                    let mut field_inner = field.into_inner();
+                                    let name = field_inner.next().unwrap().as_str().to_string();
+                                    let expr = parse_expr(field_inner.next().unwrap())?;
+                                    fields.push((name, expr));
+                                }
+                            }
+                            Ok(Expr::StructLiteral { fields })
+                        }
+                        Rule::expr_list => {
+                            // It's an array literal
+                            let elements = parse_expr_list(inner)?;
+                            Ok(Expr::ArrayLiteral(elements))
+                        }
+                        _ => unreachable!("Unexpected brace content: {:?}", inner.as_rule()),
+                    }
+                } else {
+                    // Empty braces - could be empty array or struct
+                    // Default to empty array
+                    Ok(Expr::ArrayLiteral(vec![]))
+                }
             }
+            _ => unreachable!("Unexpected content in brace literal: {:?}", content.as_rule()),
         }
+    } else {
+        // Empty braces
+        Ok(Expr::ArrayLiteral(vec![]))
     }
-    
-    Ok(Expr::StructLiteral { fields })
 }
 
 fn parse_function_literal(pair: Pair<Rule>) -> Result<Expr> {
@@ -996,7 +1126,18 @@ fn parse_string_literal(pair: Pair<Rule>) -> Result<Literal> {
 
 // Helper to convert a block to an expression
 fn block_to_expr(block: Block) -> Expr {
-    // Use a match expression as a workaround for block expressions
+    // If the block has a final expression, return it directly
+    if let Some(expr) = block.expr {
+        return *expr;
+    }
+    
+    // If the block is just statements with no expression, 
+    // it evaluates to nil
+    if block.stmts.is_empty() {
+        return Expr::Literal(Literal::Nil);
+    }
+    
+    // Otherwise, use a match expression as a workaround for statement blocks
     Expr::Match {
         is_type: false,
         expr: Box::new(Expr::Literal(Literal::Int(0))),
