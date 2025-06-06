@@ -1162,7 +1162,7 @@ impl TypeChecker {
                     // Check if this is accessing a field on an instance of the type
                     match &typedef.type_expr {
                         TypeExpr::Enum { variants, backing_type, methods } => {
-                            // First check methods (for instance access like v.get())
+                            // First check if this is a method call - methods work on both instances and types
                             for method in methods {
                                 if method.name == field_name {
                                     return Ok(TypeExpr::Function {
@@ -1172,20 +1172,25 @@ impl TypeChecker {
                                 }
                             }
                             
-                            // Then check variants (for instance field access like v.int_val)
-                            for variant in variants {
-                                if variant.name == field_name {
-                                    match &variant.data {
-                                        EnumVariantData::Type(type_expr) => return Ok(type_expr.clone()),
-                                        EnumVariantData::Unit => return Ok(TypeExpr::Name("nil".to_string(), vec![])),
-                                        EnumVariantData::Value(_) => return Err(anyhow!("Cannot access numeric enum variant as field")),
+                            // For variant access, we need to determine if this is instance field access or constructor
+                            // When we have generic args on the type name, we're likely looking for constructors
+                            // because instances don't carry generic args in their type representation
+                            let is_type_access = !args.is_empty() || typedef.generics.is_empty();
+                            
+                            if !is_type_access {
+                                // Instance field access (like v.int_val where v is an instance)
+                                for variant in variants {
+                                    if variant.name == field_name {
+                                        match &variant.data {
+                                            EnumVariantData::Type(type_expr) => return Ok(type_expr.clone()),
+                                            EnumVariantData::Unit => return Ok(TypeExpr::Name("nil".to_string(), vec![])),
+                                            EnumVariantData::Value(_) => return Err(anyhow!("Cannot access numeric enum variant as field")),
+                                        }
                                     }
                                 }
                             }
                             
-                            // Finally check if this is a variant constructor (for type access like value.int_val(...))
-                            // This happens when accessing the type name itself, not an instance
-                            // We can distinguish by checking if this is being called with arguments
+                            // Type access - look for variant constructors
                             for variant in variants {
                                 if variant.name == field_name {
                                     // Return a constructor function for this variant

@@ -613,24 +613,39 @@ impl CodeGenerator {
                 self.emit(")");
             }
             Expr::Call { func, args } => {
-                // Check if it's a method call
+                // Check if it's a method call or enum constructor call
                 if let Expr::Field { expr: obj, field } = &**func {
-                    // Method call - need to transform to function call
-                    // Get the type of obj to determine the struct name
-                    // For now, we'll assume the method name is Type_method
-                    self.emit(&format!("/* method call: {}.{} */", "TYPE", field));
-                    self.emit(&format!("{}_{}", "TYPE", field));
-                    self.emit("(");
-                    
-                    // First argument is the object
-                    self.emit("&");
-                    self.generate_expr(obj)?;
-                    
-                    for arg in args {
-                        self.emit(", ");
-                        self.generate_expr(arg)?;
+                    // Check if obj is a Type expression (enum constructor)
+                    if let Expr::Type(_) = &**obj {
+                        // This is an enum constructor call like result[i32, str].err(...)
+                        // The Field expression should already generate the constructor function name
+                        self.generate_expr(func)?;
+                        self.emit("(");
+                        for (i, arg) in args.iter().enumerate() {
+                            if i > 0 {
+                                self.emit(", ");
+                            }
+                            self.generate_expr(arg)?;
+                        }
+                        self.emit(")");
+                    } else {
+                        // Method call - need to transform to function call
+                        // Get the type of obj to determine the struct name
+                        // For now, we'll assume the method name is Type_method
+                        self.emit(&format!("/* method call: {}.{} */", "TYPE", field));
+                        self.emit(&format!("{}_{}", "TYPE", field));
+                        self.emit("(");
+                        
+                        // First argument is the object
+                        self.emit("&");
+                        self.generate_expr(obj)?;
+                        
+                        for arg in args {
+                            self.emit(", ");
+                            self.generate_expr(arg)?;
+                        }
+                        self.emit(")");
                     }
-                    self.emit(")");
                 } else {
                     self.generate_expr(func)?;
                     self.emit("(");
@@ -650,8 +665,43 @@ impl CodeGenerator {
                 self.emit("]");
             }
             Expr::Field { expr, field } => {
-                self.generate_expr(expr)?;
-                self.emit(&format!(".{}", field));
+                // Check if this is accessing a variant constructor on a type
+                if let Expr::Type(type_expr) = &**expr {
+                    // This is a type access like result[i32, str].err
+                    // Generate the constructor function name
+                    match type_expr {
+                        TypeExpr::Name(name, args) => {
+                            // For generic types, we need to mangle the name
+                            let mangled_name = if args.is_empty() {
+                                name.clone()
+                            } else {
+                                // Generic instantiation - mangle the name
+                                let mut mangled = name.clone();
+                                for arg in args {
+                                    mangled.push_str("_");
+                                    match arg {
+                                        GenericArg::Type(t) => {
+                                            mangled.push_str(&self.mangle_type(t)?);
+                                        }
+                                        GenericArg::Value(_) => {
+                                            mangled.push_str("V");
+                                        }
+                                    }
+                                }
+                                mangled
+                            };
+                            // Generate constructor function name
+                            self.emit(&format!("{}_{}_MAKE", mangled_name, field));
+                        }
+                        _ => {
+                            return Err(anyhow!("Cannot access field on non-named type"));
+                        }
+                    }
+                } else {
+                    // Normal field access
+                    self.generate_expr(expr)?;
+                    self.emit(&format!(".{}", field));
+                }
             }
             Expr::ArrayLiteral(elements) => {
                 self.emit("{");
