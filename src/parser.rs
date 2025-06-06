@@ -245,15 +245,17 @@ fn parse_type_primary(pair: Pair<Rule>) -> Result<TypeExpr> {
         }
         Rule::enum_type => {
             let mut inner = inner.into_inner();
-            let backing_type = if let Some(first) = inner.peek() {
-                if first.as_rule() == Rule::identifier {
-                    Some(inner.next().unwrap().as_str().to_string())
-                } else {
-                    None
+            
+            // Skip the "enum" keyword
+            inner.next(); // This should be enum_kw
+            
+            // Check for optional backing type (": type_name")
+            let mut backing_type = None;
+            if let Some(next) = inner.peek() {
+                if next.as_rule() == Rule::type_name {
+                    backing_type = Some(inner.next().unwrap().into_inner().next().unwrap().as_str().to_string());
                 }
-            } else {
-                None
-            };
+            }
             
             let (variants, methods) = if let Some(pair) = inner.next() {
                 parse_enum_variants(pair)?
@@ -313,11 +315,33 @@ fn parse_param_list(pair: Pair<Rule>) -> Result<Vec<Param>> {
 }
 
 fn parse_param(pair: Pair<Rule>) -> Result<Param> {
-    let mut inner = pair.into_inner();
-    let first = inner.next().unwrap();
+    // If the param is just "self" with no inner parts
+    if pair.as_str() == "self" {
+        return Ok(Param {
+            mutable: false,
+            name: "self".to_string(),
+            type_expr: None,
+        });
+    }
     
-    if first.as_str() == "self" || first.as_str() == "mut" {
-        let mutable = first.as_str() == "mut";
+    let mut inner = pair.into_inner();
+    
+    // Handle empty params (shouldn't happen but let's be safe)
+    let first = match inner.next() {
+        Some(p) => p,
+        None => return Err(anyhow!("Empty parameter")),
+    };
+    
+    if first.as_str() == "self" || first.as_rule() == Rule::mut_kw {
+        let mutable = first.as_rule() == Rule::mut_kw;
+        // Check if next element is "self"
+        if mutable {
+            // After mut, we expect "self"
+            let next = inner.next();
+            if next.is_none() || next.unwrap().as_str() != "self" {
+                return Err(anyhow!("Expected 'self' after 'mut'"));
+            }
+        }
         Ok(Param {
             mutable,
             name: "self".to_string(),
@@ -502,25 +526,24 @@ fn parse_stmt(pair: Pair<Rule>) -> Result<Stmt> {
         Rule::block_stmt => Ok(Stmt::Block(parse_block(inner.into_inner().next().unwrap())?)),
         Rule::if_stmt => {
             let mut inner = inner.into_inner();
+            inner.next(); // skip "if" keyword
             let condition = parse_expr(inner.next().unwrap())?;
             let then_block = parse_block(inner.next().unwrap())?;
             
-            let else_part = inner.next().map(|p| {
-                match p.as_rule() {
-                    Rule::if_stmt => {
-                        // Parse the if_stmt directly
-                        let mut if_inner = p.into_inner();
-                        let cond = parse_expr(if_inner.next().unwrap()).unwrap();
-                        let then_b = parse_block(if_inner.next().unwrap()).unwrap();
-                        let else_p = if_inner.next().map(|ep| {
-                            Box::new(Stmt::Block(parse_block(ep).unwrap()))
-                        });
-                        Box::new(Stmt::If { condition: cond, then_block: then_b, else_part: else_p })
+            let else_part = if inner.next().is_some() { // skip "else" keyword
+                inner.next().map(|p| {
+                    match p.as_rule() {
+                        Rule::if_stmt => {
+                            // Parse the if_stmt as a stmt
+                            Box::new(parse_stmt(p).unwrap())
+                        }
+                        Rule::block => Box::new(Stmt::Block(parse_block(p).unwrap())),
+                        _ => unreachable!(),
                     }
-                    Rule::block => Box::new(Stmt::Block(parse_block(p).unwrap())),
-                    _ => unreachable!(),
-                }
-            });
+                })
+            } else {
+                None
+            };
             
             Ok(Stmt::If { condition, then_block, else_part })
         }
@@ -530,11 +553,13 @@ fn parse_stmt(pair: Pair<Rule>) -> Result<Stmt> {
             
             let (label, condition, body) = if first.as_rule() == Rule::label {
                 let label = Some(first.as_str().to_string());
+                inner.next(); // skip "while" keyword
                 let condition = parse_expr(inner.next().unwrap())?;
                 let body = parse_block(inner.next().unwrap())?;
                 (label, condition, body)
             } else {
-                let condition = parse_expr(first)?;
+                // first is "while" keyword, skip it
+                let condition = parse_expr(inner.next().unwrap())?;
                 let body = parse_block(inner.next().unwrap())?;
                 (None, condition, body)
             };

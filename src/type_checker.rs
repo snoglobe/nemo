@@ -1031,22 +1031,95 @@ impl TypeChecker {
     
     fn lookup_field(&self, type_expr: &TypeExpr, field_name: &str) -> Result<TypeExpr> {
         match type_expr {
-            TypeExpr::Struct { fields, .. } => {
+            TypeExpr::Struct { fields, methods } => {
+                // First check fields
                 for field in fields {
                     if field.name == field_name {
                         return Ok(field.type_expr.clone());
                     }
                 }
-                Err(anyhow!("No field '{}' in struct", field_name))
+                // Then check methods
+                for method in methods {
+                    if method.name == field_name {
+                        return Ok(TypeExpr::Function {
+                            params: method.params.clone(),
+                            return_type: Box::new(method.return_type.clone()),
+                        });
+                    }
+                }
+                Err(anyhow!("No field or method '{}' in struct", field_name))
+            }
+            TypeExpr::Enum { variants, methods, .. } => {
+                // First check if the field name matches a variant
+                for variant in variants {
+                    if variant.name == field_name {
+                        match &variant.data {
+                            EnumVariantData::Type(type_expr) => return Ok(type_expr.clone()),
+                            EnumVariantData::Unit => return Ok(TypeExpr::Name("nil".to_string(), vec![])),
+                            EnumVariantData::Value(_) => return Err(anyhow!("Cannot access numeric enum variant as field")),
+                        }
+                    }
+                }
+                // Then check methods
+                for method in methods {
+                    if method.name == field_name {
+                        return Ok(TypeExpr::Function {
+                            params: method.params.clone(),
+                            return_type: Box::new(method.return_type.clone()),
+                        });
+                    }
+                }
+                Err(anyhow!("No variant or method '{}' in enum", field_name))
             }
             TypeExpr::Name(name, _) => {
                 // Look up type definition
                 if let Some(typedef) = self.types.get(name) {
-                    return self.lookup_field(&typedef.type_expr, field_name);
+                    // If this is accessing a field on the type itself (not an instance),
+                    // check if it's an enum variant constructor
+                    match &typedef.type_expr {
+                        TypeExpr::Enum { variants, .. } => {
+                            // Check if the field name matches a variant for constructor
+                            for variant in variants {
+                                if variant.name == field_name {
+                                    // Return a constructor function for this variant
+                                    match &variant.data {
+                                        EnumVariantData::Type(variant_type) => {
+                                            // Constructor takes the variant data type and returns the enum type
+                                            return Ok(TypeExpr::Function {
+                                                params: vec![Param {
+                                                    mutable: false,
+                                                    name: "value".to_string(),
+                                                    type_expr: Some(variant_type.clone()),
+                                                }],
+                                                return_type: Box::new(TypeExpr::Name(name.clone(), vec![])),
+                                            });
+                                        }
+                                        EnumVariantData::Unit => {
+                                            // Unit variant constructor takes no arguments
+                                            return Ok(TypeExpr::Function {
+                                                params: vec![],
+                                                return_type: Box::new(TypeExpr::Name(name.clone(), vec![])),
+                                            });
+                                        }
+                                        EnumVariantData::Value(_) => {
+                                            return Err(anyhow!("Cannot use numeric enum variant {} as constructor", field_name));
+                                        }
+                                    }
+                                }
+                            }
+                            // If we didn't find a variant, it's not a valid field
+                            return Err(anyhow!("No variant '{}' in enum type {}", field_name, name));
+                        }
+                        _ => {
+                            // For non-enum types accessed as type names, 
+                            // we don't support field access
+                            return Err(anyhow!("Cannot access field '{}' on type {}", field_name, name));
+                        }
+                    }
                 }
                 Err(anyhow!("Unknown type: {}", name))
             }
-            _ => Err(anyhow!("Cannot access field on non-struct type")),
+            _ => Err(anyhow!("Cannot access field on non-struct/enum type")),
         }
     }
     
